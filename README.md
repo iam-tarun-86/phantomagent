@@ -233,7 +233,7 @@ NETWORK_INTERFACE = "eth0"
 
 ## License
 
-MIT License — Copyright (c) 2026 [Your Name]
+MIT License — Copyright (c) 2026 TARUN R
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
