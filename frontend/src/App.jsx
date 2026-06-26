@@ -1,5 +1,6 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useDashboard } from './context/DashboardContext.jsx'
+import LoginPage from './components/LoginPage'
 import AuthorityBar from './components/AuthorityBar'
 import ThreatFeed from './components/ThreatFeed'
 import AttackMap from './components/AttackMap'
@@ -8,7 +9,12 @@ import TerminalStream from './components/TerminalStream'
 import RedAlertModal from './components/RedAlertModal'
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
   const { alert, approveThreat, dismissThreat, isConnected } = useDashboard()
+
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={() => setIsAuthenticated(true)} />
+  }
 
   return (
     <div className="min-h-screen bg-deep-space text-data-white font-sans grid-bg-animated">

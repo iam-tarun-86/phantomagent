@@ -25,13 +25,14 @@ const KillChain = () => {
       <div className="flex-1 glass-panel p-4 flex flex-col gap-3 relative">
         {CHAIN_NODES.map((node, index) => {
           const Icon = node.icon;
-          // FIX: isComplete takes priority over isActive
           const isComplete = activeNode !== null && index <= activeNode;
-          const isActive = activeNode === index && !isComplete; // Only active if NOT complete
+          const isActive = activeNode === index && !isComplete;
           const isPast = activeNode !== null && index < activeNode;
 
           return (
             <div key={node.id} className="relative">
+              {/* Connector line — REMOVED completely */}
+              {/* 
               {index < CHAIN_NODES.length - 1 && (
                 <div className="absolute left-[19px] top-[36px] w-0.5 h-[calc(100%+12px)] bg-panel-border">
                   <motion.div
@@ -42,6 +43,7 @@ const KillChain = () => {
                   />
                 </div>
               )}
+              */}
 
               <motion.div
                 animate={{
@@ -53,8 +55,8 @@ const KillChain = () => {
               >
                 <div className="relative">
                   <div className={`w-10 h-10 rounded-lg flex items-center justify-center border ${isComplete ? 'border-contain-green/30 bg-contain-green/10' :
-                      isActive ? 'border-neon-cyan/50 bg-neon-cyan/10' :
-                        'border-panel-border bg-panel-base'
+                    isActive ? 'border-neon-cyan/50 bg-neon-cyan/10' :
+                      'border-panel-border bg-panel-base'
                     }`}>
                     <Icon size={18} className={isComplete ? 'text-contain-green' : isActive ? 'text-neon-cyan' : 'text-data-white/30'} />
                   </div>

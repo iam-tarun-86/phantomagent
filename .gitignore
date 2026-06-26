@@ -47,3 +47,6 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# App Data
+backend/data/forensic_*.txt

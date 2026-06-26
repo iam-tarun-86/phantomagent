@@ -107,12 +107,8 @@ const ThreatFeed = () => {
                     <span className="text-sm font-mono font-bold tracking-wider text-data-white">LIVE THREATS</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                    <motion.div
-                        animate={{ scale: [1, 1.2, 1] }}
-                        transition={{ duration: 2, repeat: Infinity }}
-                        className="w-2 h-2 rounded-full bg-alert-red"
-                    />
-                    <span className="text-[10px] font-mono text-alert-red font-bold">LIVE</span>
+                    <div className="w-2 h-2 rounded-full bg-alert-red radar-pulse" />
+                    <span className="text-[10px] font-mono text-alert-red font-bold flicker-text">LIVE</span>
                 </div>
             </div>
 

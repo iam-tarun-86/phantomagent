@@ -1,73 +1,98 @@
-import React, { useRef } from 'react'
+import React, { useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Terminal } from 'lucide-react'
 import { useDashboard } from '../context/DashboardContext.jsx'
 
-const LOG_COLORS = {
-    'WATCHER': 'text-data-white/70',
-    'PREFILTER': 'text-warning-amber',
-    'QWEN': 'text-neon-cyan',
-    'DECISION': 'text-purple-400',
-    'RESPONSE': 'text-contain-green',
-    'FORENSIC': 'text-blue-400',
-}
+// Typewriter hook inline (or import from hooks/useTypewriter.js)
+const useTypewriter = (text, speed = 25, startTyping = true) => {
+    const [displayedText, setDisplayedText] = React.useState('');
+    const [isComplete, setIsComplete] = React.useState(false);
 
-const LOG_LEVELS = {
-    'INFO': 'text-data-white/70',
-    'WARN': 'text-warning-amber',
-    'CRITICAL': 'text-alert-red',
-}
+    React.useEffect(() => {
+        if (!startTyping || !text) {
+            setDisplayedText('');
+            setIsComplete(false);
+            return;
+        }
+
+        setDisplayedText('');
+        setIsComplete(false);
+
+        let index = 0;
+        const timer = setInterval(() => {
+            if (index < text.length) {
+                setDisplayedText(text.slice(0, index + 1));
+                index++;
+            } else {
+                setIsComplete(true);
+                clearInterval(timer);
+            }
+        }, speed);
+
+        return () => clearInterval(timer);
+    }, [text, speed, startTyping]);
+
+    return { displayedText, isComplete };
+};
+
+const LogEntry = ({ log, index }) => {
+    const fullText = `[${log.timestamp}] [${log.source}] ${log.message}`;
+    const { displayedText, isComplete } = useTypewriter(fullText, 20, true);
+
+    const getLevelColor = (level) => {
+        switch (level) {
+            case 'CRITICAL': return 'text-alert-red';
+            case 'WARN': return 'text-warning-amber';
+            case 'INFO': return 'text-neon-cyan';
+            default: return 'text-data-white/60';
+        }
+    };
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: index * 0.1 }}
+            className="font-mono text-xs mb-1"
+        >
+            <span className={getLevelColor(log.level)}>
+                {displayedText}
+                {!isComplete && (
+                    <span className="inline-block w-2 h-4 bg-neon-cyan ml-0.5 animate-pulse" />
+                )}
+            </span>
+        </motion.div>
+    );
+};
 
 const TerminalStream = () => {
     const { logs } = useDashboard()
     const scrollRef = useRef(null)
 
+    useEffect(() => {
+        if (scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+        }
+    }, [logs])
+
     return (
-        <div className="h-full flex flex-col glass-panel p-3">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-2 px-1">
-                <div className="flex items-center gap-2">
-                    <Terminal size={14} className="text-contain-green" />
-                    <span className="text-xs font-mono font-bold tracking-wider text-data-white">SYSTEM LOGS</span>
-                </div>
-                <div className="flex items-center gap-3">
-                    <span className="text-[10px] font-mono text-data-white/30">
-                        {logs.length} ENTRIES
-                    </span>
-                </div>
+        <div className="h-full flex flex-col">
+            <div className="flex items-center gap-2 mb-3 px-1">
+                <Terminal size={16} className="text-neon-cyan" />
+                <span className="text-sm font-mono font-bold tracking-wider text-data-white">SYSTEM LOGS</span>
+                <div className="flex-1" />
+                <span className="text-[10px] font-mono text-data-white/30">{logs.length} ENTRIES</span>
             </div>
 
-            {/* Terminal */}
             <div
                 ref={scrollRef}
-                className="flex-1 overflow-y-auto terminal-scroll font-mono text-[11px] leading-relaxed"
+                className="flex-1 overflow-y-auto terminal-scroll pr-2"
             >
-                <AnimatePresence initial={false}>
+                <AnimatePresence>
                     {logs.map((log, index) => (
-                        <motion.div
-                            key={index}
-                            initial={{ opacity: 0, x: -10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0 }}
-                            className="flex items-start gap-2 py-0.5 hover:bg-panel-base/50 px-1 rounded"
-                        >
-                            <span className="text-data-white/20 shrink-0">[{log.timestamp}]</span>
-                            <span className={`shrink-0 font-bold ${LOG_LEVELS[log.level] || 'text-data-white/70'}`}>
-                                [{log.source}]
-                            </span>
-                            <span className="text-data-white/60 break-all">{log.message}</span>
-                        </motion.div>
+                        <LogEntry key={`${log.timestamp}-${index}`} log={log} index={index} />
                     ))}
                 </AnimatePresence>
-
-                {/* Blinking cursor */}
-                <motion.span
-                    animate={{ opacity: [1, 0, 1] }}
-                    transition={{ duration: 1, repeat: Infinity }}
-                    className="text-contain-green ml-1"
-                >
-                    ▋
-                </motion.span>
             </div>
         </div>
     )
