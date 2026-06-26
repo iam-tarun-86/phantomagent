@@ -1,14 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { AlertTriangle, ShieldAlert, ShieldCheck, Globe, FileWarning, Terminal } from 'lucide-react'
+import { AlertTriangle, ShieldAlert, Terminal, Globe, FileWarning } from 'lucide-react'
+import { useDashboard } from '../context/DashboardContext.jsx'
 
-const THREAT_TYPES = [
-    { type: 'Brute Force', icon: Terminal, color: 'text-alert-red' },
-    { type: 'Port Scan', icon: Globe, color: 'text-warning-amber' },
-    { type: 'File Anomaly', icon: FileWarning, color: 'text-neon-cyan' },
-    { type: 'DNS Tunneling', icon: Globe, color: 'text-purple-400' },
-    { type: 'Suspicious Login', icon: AlertTriangle, color: 'text-warning-amber' },
-]
+const THREAT_ICONS = {
+    'Brute Force': Terminal,
+    'Port Scan': Globe,
+    'File Anomaly': FileWarning,
+    'DNS Tunneling': Globe,
+    'Suspicious Login': AlertTriangle,
+    'Malware': AlertTriangle,
+    'Unknown': AlertTriangle,
+}
 
 const SEVERITY_CONFIG = {
     1: { color: 'bg-gray-500', text: 'text-gray-400', label: 'LOW' },
@@ -23,26 +26,9 @@ const SEVERITY_CONFIG = {
     10: { color: 'bg-alert-red', text: 'text-alert-red', label: 'CRIT' },
 }
 
-const generateThreat = () => {
-    const typeConfig = THREAT_TYPES[Math.floor(Math.random() * THREAT_TYPES.length)]
-    const severity = Math.random() > 0.7 ? Math.floor(Math.random() * 4) + 7 : Math.floor(Math.random() * 6) + 1
-    const ip = `192.168.1.${Math.floor(Math.random() * 255)}`
-
-    return {
-        id: Date.now() + Math.random(),
-        type: typeConfig.type,
-        icon: typeConfig.icon,
-        color: typeConfig.color,
-        severity,
-        sourceIP: ip,
-        timestamp: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        status: severity >= 7 ? 'PENDING' : 'RESOLVED'
-    }
-}
-
 const ThreatCard = ({ threat }) => {
-    const Icon = threat.icon
-    const config = SEVERITY_CONFIG[threat.severity]
+    const Icon = THREAT_ICONS[threat.type] || AlertTriangle
+    const config = SEVERITY_CONFIG[threat.severity] || SEVERITY_CONFIG[5]
 
     return (
         <motion.div
@@ -55,16 +41,18 @@ const ThreatCard = ({ threat }) => {
         >
             <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2">
-                    <Icon size={14} className={threat.color} />
+                    <Icon size={14} className={config.text} />
                     <span className="text-xs font-mono font-bold text-data-white">{threat.type}</span>
                 </div>
-                <span className="text-[10px] font-mono text-data-white/30">{threat.timestamp}</span>
+                <span className="text-[10px] font-mono text-data-white/30">
+                    {new Date(threat.timestamp).toLocaleTimeString()}
+                </span>
             </div>
 
             <div className="flex items-center justify-between mt-2">
                 <div className="flex items-center gap-2">
                     <span className="text-[10px] font-mono text-data-white/40">SRC:</span>
-                    <span className="text-[10px] font-mono text-data-white/60">{threat.sourceIP}</span>
+                    <span className="text-[10px] font-mono text-data-white/60">{threat.source_ip}</span>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -91,40 +79,24 @@ const ThreatCard = ({ threat }) => {
                     <span className="text-[10px] font-mono text-alert-red font-bold tracking-wider">AWAITING APPROVAL</span>
                 </motion.div>
             )}
+
+            {threat.status === 'CONTAINED' && (
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="mt-2 flex items-center gap-1.5"
+                >
+                    <div className="w-1.5 h-1.5 rounded-full bg-contain-green" />
+                    <span className="text-[10px] font-mono text-contain-green font-bold tracking-wider">CONTAINED</span>
+                </motion.div>
+            )}
         </motion.div>
     )
 }
 
 const ThreatFeed = () => {
-    const [threats, setThreats] = useState(() => {
-        // Generate initial threats
-        const initial = []
-        for (let i = 0; i < 5; i++) {
-            initial.push(generateThreat())
-        }
-        return initial.reverse()
-    })
-
+    const { threats } = useDashboard()
     const scrollRef = useRef(null)
-
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setThreats(prev => {
-                const newThreat = generateThreat()
-                const updated = [newThreat, ...prev].slice(0, 20) // Keep last 20
-                return updated
-            })
-        }, 4000)
-
-        return () => clearInterval(interval)
-    }, [])
-
-    // Auto-scroll to top when new threat arrives
-    useEffect(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = 0
-        }
-    }, [threats])
 
     return (
         <div className="h-full flex flex-col">

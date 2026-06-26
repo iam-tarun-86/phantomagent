@@ -1,16 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Shield, Activity, Cpu, HardDrive, Zap, Power } from 'lucide-react'
 import { motion } from 'framer-motion'
-
-// Fake telemetry data generator
-const generateTelemetry = () => ({
-    cpu: Math.floor(Math.random() * 15) + 8,      // 8-23%
-    ram: (Math.random() * 0.8 + 3.8).toFixed(1), // 3.8-4.6 GB
-    vram: (Math.random() * 0.3 + 5.6).toFixed(1), // 5.6-5.9 GB
-    qwenStatus: 'WARM',
-    threatsBlocked: 47,
-    uptime: '2d 14h 33m'
-})
+import { useDashboard } from '../context/DashboardContext.jsx'
 
 const MetricBox = ({ icon: Icon, label, value, unit, color, sparkline }) => (
     <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-panel-base/50 border border-panel-border/50">
@@ -22,40 +13,36 @@ const MetricBox = ({ icon: Icon, label, value, unit, color, sparkline }) => (
                 <span className="text-[10px] text-data-white/30 font-mono">{unit}</span>
             </div>
         </div>
-        {/* Mini sparkline */}
-        <svg width="40" height="20" className="ml-1 opacity-60">
-            <polyline
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                className={color}
-                points={sparkline.map((v, i) => `${i * 8},${20 - v}`).join(' ')}
-            />
-        </svg>
+        {sparkline && (
+            <svg width="40" height="20" className="ml-1 opacity-60">
+                <polyline
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    className={color}
+                    points={sparkline.map((v, i) => `${i * 8},${20 - v}`).join(' ')}
+                />
+            </svg>
+        )}
     </div>
 )
 
 const AuthorityBar = () => {
-    const [telemetry, setTelemetry] = useState(generateTelemetry())
+    const { telemetry } = useDashboard()
+    const [autoMode, setAutoMode] = useState(true)
     const [history, setHistory] = useState({
         cpu: [12, 14, 11, 15, 10],
         ram: [16, 15, 17, 14, 16],
         vram: [14, 15, 13, 14, 15]
     })
-    const [autoMode, setAutoMode] = useState(true)
 
     useEffect(() => {
-        const interval = setInterval(() => {
-            const newData = generateTelemetry()
-            setTelemetry(newData)
-            setHistory(prev => ({
-                cpu: [...prev.cpu.slice(1), Math.floor(Math.random() * 8) + 10],
-                ram: [...prev.ram.slice(1), Math.floor(Math.random() * 4) + 14],
-                vram: [...prev.vram.slice(1), Math.floor(Math.random() * 3) + 13]
-            }))
-        }, 2000)
-        return () => clearInterval(interval)
-    }, [])
+        setHistory(prev => ({
+            cpu: [...prev.cpu.slice(1), Math.min(telemetry.cpu + 10, 20)],
+            ram: [...prev.ram.slice(1), Math.min(telemetry.ram * 4, 20)],
+            vram: [...prev.vram.slice(1), Math.min(telemetry.vram * 2.5, 18)]
+        }))
+    }, [telemetry])
 
     return (
         <motion.div
@@ -64,7 +51,7 @@ const AuthorityBar = () => {
             transition={{ duration: 0.6, ease: "easeOut" }}
             className="h-16 border-b border-panel-border bg-panel-base/60 backdrop-blur-md flex items-center justify-between px-6 fixed top-0 left-0 right-0 z-40"
         >
-            {/* Left: Logo & Identity */}
+            {/* Left: Logo */}
             <div className="flex items-center gap-3">
                 <div className="relative">
                     <Shield size={24} className="text-neon-cyan" />
@@ -83,17 +70,15 @@ const AuthorityBar = () => {
                     </span>
                 </div>
                 <div className="h-6 w-px bg-panel-border mx-2" />
-                <span className="text-[10px] text-data-white/20 font-mono">
-                    v1.0.0-BETA
-                </span>
+                <span className="text-[10px] text-data-white/20 font-mono">v1.0.0-BETA</span>
             </div>
 
-            {/* Center: Hardware Telemetry */}
+            {/* Center: Telemetry - REAL DATA */}
             <div className="flex items-center gap-2">
                 <MetricBox
                     icon={Cpu}
                     label="CPU"
-                    value={telemetry.cpu}
+                    value={telemetry.cpu.toFixed(1)}
                     unit="%"
                     color="text-blue-400"
                     sparkline={history.cpu}
@@ -101,7 +86,7 @@ const AuthorityBar = () => {
                 <MetricBox
                     icon={HardDrive}
                     label="RAM"
-                    value={telemetry.ram}
+                    value={telemetry.ram.toFixed(1)}
                     unit="GB"
                     color="text-purple-400"
                     sparkline={history.ram}
@@ -109,8 +94,8 @@ const AuthorityBar = () => {
                 <MetricBox
                     icon={Zap}
                     label="GPU VRAM"
-                    value={telemetry.vram}
-                    unit="GB / 8GB"
+                    value={`${telemetry.vram.toFixed(1)} / 8GB`}
+                    unit=""
                     color="text-contain-green"
                     sparkline={history.vram}
                 />
@@ -124,7 +109,7 @@ const AuthorityBar = () => {
                                 transition={{ duration: 1.5, repeat: Infinity }}
                                 className="w-1.5 h-1.5 rounded-full bg-contain-green"
                             />
-                            <span className="text-sm font-mono font-bold text-contain-green">{telemetry.qwenStatus}</span>
+                            <span className="text-sm font-mono font-bold text-contain-green">{telemetry.qwen_status}</span>
                         </div>
                     </div>
                 </div>
@@ -134,7 +119,7 @@ const AuthorityBar = () => {
             <div className="flex items-center gap-4">
                 <div className="flex flex-col items-end">
                     <span className="text-[10px] text-data-white/30 font-mono">THREATS BLOCKED</span>
-                    <span className="text-lg font-mono font-bold text-contain-green">{telemetry.threatsBlocked}</span>
+                    <span className="text-lg font-mono font-bold text-contain-green">{telemetry.threats_blocked}</span>
                 </div>
 
                 <div className="h-8 w-px bg-panel-border" />
@@ -146,7 +131,6 @@ const AuthorityBar = () => {
 
                 <div className="h-8 w-px bg-panel-border" />
 
-                {/* Autonomous Mode Toggle */}
                 <button
                     onClick={() => setAutoMode(!autoMode)}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-md border transition-all duration-300 ${autoMode
