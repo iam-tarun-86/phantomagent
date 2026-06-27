@@ -47,7 +47,7 @@ export const DashboardProvider = ({ children }) => {
     const [pipeline, setPipeline] = useState({ stage: -1, threat_id: null });
     const [alert, setAlert] = useState(null);
     const [isConnected, setIsConnected] = useState(false);
-    const [audioReady, setAudioReady] = useState(false); // NEW: track audio state in React
+    const [audioReady, setAudioReady] = useState(false);
 
     const actionLock = useRef(false);
     const processedThreats = useRef(new Set());
@@ -57,8 +57,6 @@ export const DashboardProvider = ({ children }) => {
     useEffect(() => {
         const unlock = () => {
             if (audioReady) return;
-
-            // Try silent playback to unlock
             const silent = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
             silent.play().then(() => {
                 setAudioReady(true);
@@ -66,7 +64,6 @@ export const DashboardProvider = ({ children }) => {
             }).catch(() => { });
         };
 
-        // Multiple events can unlock
         document.addEventListener('click', unlock, { once: true });
         document.addEventListener('keydown', unlock, { once: true });
         document.addEventListener('touchstart', unlock, { once: true });
@@ -104,28 +101,40 @@ export const DashboardProvider = ({ children }) => {
                 stopCriticalSound();
             }),
 
-            wsService.on('threat', (d) => setThreats(prev => [d, ...prev].slice(0, 20))),
+            wsService.on('threat', (d) => setThreats(prev => [{
+                id: d.id,
+                type: d.type,
+                source_ip: d.source_ip,
+                severity: d.severity,
+                timestamp: d.timestamp,
+                status: d.status,
+                reason: d.reason,
+                confidence: d.confidence,
+                indicators: d.indicators
+            }, ...prev].slice(0, 20))),
             wsService.on('log', (d) => setLogs(prev => [...prev, d].slice(-50))),
             wsService.on('telemetry', (d) => setTelemetry(d)),
             wsService.on('pipeline', (d) => setPipeline(d)),
 
             wsService.on('alert', (d) => {
-                setAlert(d);
-                actionLock.current = false;
-                processedThreats.current.delete(d.threat_id);
-                if (d.severity >= 9) {
-                    if (audioReady) {
-                        playCriticalSound();
-                    } else {
-                        console.log('[AUDIO] Queued for unlock');
-                        pendingAlertRef.current = d;
+                setAlert(null);
+                setTimeout(() => {
+                    setAlert(d);
+                    actionLock.current = false;
+                    processedThreats.current.delete(d.threat_id);
+                    if (d.severity >= 9) {
+                        if (audioReady) {
+                            playCriticalSound();
+                        } else {
+                            console.log('[AUDIO] Queued for unlock');
+                            pendingAlertRef.current = d;
+                        }
                     }
-                }
+                }, 50);
             }),
 
             wsService.on('contained', (d) => {
                 console.log('[DASHBOARD] Contained:', d);
-                setAlert(null);
                 actionLock.current = false;
                 stopCriticalSound();
                 setPipeline({ stage: 4, threat_id: d.threat_id });
@@ -149,31 +158,37 @@ export const DashboardProvider = ({ children }) => {
         return () => {
             unsubs.forEach(u => u());
         };
-    }, [audioReady]); // Depend on audioReady
+    }, [audioReady]);
 
     const approveThreat = useCallback(async (id) => {
         if (actionLock.current) {
-            console.log('[DASHBOARD] Action locked, ignoring approve');
-            return;
+            console.log('[DASHBOARD] Action locked, ignoring approve')
+            return
         }
         if (processedThreats.current.has(id)) {
-            console.log('[DASHBOARD] Already processed:', id);
-            return;
+            console.log('[DASHBOARD] Already processed:', id)
+            return
         }
-        console.log('[DASHBOARD] Approving:', id);
-        actionLock.current = true;
+        console.log('[DASHBOARD] Approving:', id)
+        actionLock.current = true
         try {
-            const result = await wsService.approveThreat(id);
-            console.log('[DASHBOARD] Approve result:', result);
+            const result = await wsService.approveThreat(id)
+            console.log('[DASHBOARD] Approve result:', result)
         } catch (err) {
-            console.error('[DASHBOARD] Approve failed:', err);
-            actionLock.current = false;
+            console.error('[DASHBOARD] Approve failed:', err)
+        } finally {
+            actionLock.current = false
         }
-    }, []);
+    }, [])
 
     const dismissThreat = useCallback(async (id) => {
+        // ALWAYS clear alert immediately — don't wait for backend
+        setAlert(null);
+        stopCriticalSound();
+        setPipeline({ stage: -1, threat_id: null });
+
         if (actionLock.current) {
-            console.log('[DASHBOARD] Action locked, ignoring dismiss');
+            console.log('[DASHBOARD] Action locked, ignoring dismiss backend call');
             return;
         }
         if (processedThreats.current.has(id)) {
@@ -187,6 +202,7 @@ export const DashboardProvider = ({ children }) => {
             console.log('[DASHBOARD] Dismiss result:', result);
         } catch (err) {
             console.error('[DASHBOARD] Dismiss failed:', err);
+        } finally {
             actionLock.current = false;
         }
     }, []);

@@ -15,15 +15,15 @@ const MatrixRain = () => (
         className="absolute font-mono text-xs text-contain-green"
         style={{ left: `${i * 4}%`, top: -50 }}
         animate={{ top: ['-10%', '110%'] }}
-        transition={{ 
-          duration: 10 + Math.random() * 20, 
-          repeat: Infinity, 
+        transition={{
+          duration: 10 + Math.random() * 20,
+          repeat: Infinity,
           delay: Math.random() * 10,
           ease: "linear"
         }}
       >
-        {Array.from({length: 30}, () => 
-          Math.random() > 0.5 ? '1' : Math.random() > 0.5 ? '0' : ['A','B','C','D','E','F'][Math.floor(Math.random()*6)]
+        {Array.from({ length: 30 }, () =>
+          Math.random() > 0.5 ? '1' : Math.random() > 0.5 ? '0' : ['A', 'B', 'C', 'D', 'E', 'F'][Math.floor(Math.random() * 6)]
         ).join('')}
       </motion.div>
     ))}
@@ -44,7 +44,7 @@ const LoginPage = ({ onLogin }) => {
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
-  
+
   const usernameRef = useRef(null)
   const passwordRef = useRef(null)
   const [activeField, setActiveField] = useState('username')
@@ -142,7 +142,7 @@ const LoginPage = ({ onLogin }) => {
         </div>
 
         <div className="bg-[#0d0d0d] border border-t-0 border-[#33ff33]/20 rounded-b-lg p-6 min-h-[320px] shadow-[0_0_40px_rgba(51,255,51,0.05)]">
-          
+
           <AnimatePresence>
             {!bootComplete && (
               <div className="space-y-1">

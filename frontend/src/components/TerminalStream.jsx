@@ -1,7 +1,8 @@
-import React, { useRef, useEffect } from 'react'
+import React, { useRef, useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Terminal } from 'lucide-react'
+import { Terminal, Maximize2 } from 'lucide-react'
 import { useDashboard } from '../context/DashboardContext.jsx'
+import FullscreenLogViewer from './FullscreenLogViewer'
 
 // Typewriter hook inline (or import from hooks/useTypewriter.js)
 const useTypewriter = (text, speed = 25, startTyping = true) => {
@@ -68,6 +69,7 @@ const LogEntry = ({ log, index }) => {
 const TerminalStream = () => {
     const { logs } = useDashboard()
     const scrollRef = useRef(null)
+    const [showFullscreen, setShowFullscreen] = useState(false)
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -76,25 +78,39 @@ const TerminalStream = () => {
     }, [logs])
 
     return (
-        <div className="h-full flex flex-col">
-            <div className="flex items-center gap-2 mb-3 px-1">
-                <Terminal size={16} className="text-neon-cyan" />
-                <span className="text-sm font-mono font-bold tracking-wider text-data-white">SYSTEM LOGS</span>
-                <div className="flex-1" />
-                <span className="text-[10px] font-mono text-data-white/30">{logs.length} ENTRIES</span>
+        <>
+            <div className="h-full flex flex-col">
+                <div className="flex items-center gap-2 mb-3 px-1">
+                    <Terminal size={16} className="text-neon-cyan" />
+                    <span className="text-sm font-mono font-bold tracking-wider text-data-white">SYSTEM LOGS</span>
+                    <div className="flex-1" />
+                    <span className="text-[10px] font-mono text-data-white/30 mr-2">{logs.length} ENTRIES</span>
+                    <button
+                        onClick={() => setShowFullscreen(true)}
+                        className="p-1.5 rounded hover:bg-panel-border text-data-white/40 hover:text-neon-cyan transition-colors"
+                        title="Toggle Fullscreen"
+                    >
+                        <Maximize2 size={14} />
+                    </button>
+                </div>
+
+                <div
+                    ref={scrollRef}
+                    className="flex-1 overflow-y-auto terminal-scroll pr-2"
+                >
+                    <AnimatePresence>
+                        {logs.map((log, index) => (
+                            <LogEntry key={`${log.timestamp}-${index}`} log={log} index={index} />
+                        ))}
+                    </AnimatePresence>
+                </div>
             </div>
 
-            <div
-                ref={scrollRef}
-                className="flex-1 overflow-y-auto terminal-scroll pr-2"
-            >
-                <AnimatePresence>
-                    {logs.map((log, index) => (
-                        <LogEntry key={`${log.timestamp}-${index}`} log={log} index={index} />
-                    ))}
-                </AnimatePresence>
-            </div>
-        </div>
+            <FullscreenLogViewer
+                isOpen={showFullscreen}
+                onClose={() => setShowFullscreen(false)}
+            />
+        </>
     )
 }
 

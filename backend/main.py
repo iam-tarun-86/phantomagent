@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-
+from backend.database import db
 from backend.config import API_HOST, API_PORT, WATCHED_LOGS, WATCHED_PATHS, NETWORK_INTERFACE
 from backend.models.threat import Threat, ThreatType, ThreatStatus
 from backend.watchers.log_watcher import LogWatcher
@@ -22,6 +22,7 @@ from backend.pipeline.responder import Responder
 
 class DashboardState:
     def __init__(self):
+        # DASHBOARD STARTS FRESH — no old threats/logs on startup
         self.threats: List[Dict] = []
         self.logs: List[Dict] = []
         self.pipeline_state = {"stage": -1, "threat_id": None}
@@ -30,7 +31,7 @@ class DashboardState:
             "ram": 4.2,
             "vram": 5.8,
             "qwen_status": "WARM",
-            "threats_blocked": 47,
+            "threats_blocked": 0,
             "uptime": "0d 0h 0m"
         }
         self.clients: Set[WebSocket] = set()
@@ -68,6 +69,9 @@ class DashboardState:
         if len(self.logs) > 100:
             self.logs = self.logs[-100:]
         
+        # SAVE TO DATABASE
+        db.save_log(log_entry)
+        
         await self.broadcast({"type": "log", "data": log_entry})
     
     async def process_event(self, event: Dict):
@@ -89,6 +93,19 @@ class DashboardState:
         
         await self.broadcast_pipeline(3, filtered)
         decision = self.decision.decide(analysis)
+                # Preserve test event severity if higher than AI's analysis
+        if event.get('severity', 0) > analysis.get('severity', 0):
+            analysis['severity'] = event['severity']
+            # Also preserve XAI fields from test event
+            if event.get('reason'):
+                analysis['reason'] = event['reason']
+            if event.get('confidence'):
+                analysis['confidence'] = event['confidence']
+            if event.get('indicators'):
+                analysis['indicators'] = event['indicators']
+            
+            # Re-run decision with corrected severity
+            decision = self.decision.decide(analysis)
         
         await self.add_log("DECISION", "INFO", f"Action: {decision['action']}")
         
@@ -106,6 +123,10 @@ class DashboardState:
             attack_pattern=analysis.get('attack_pattern'),
             explanation=analysis.get('explanation')
         )
+        
+        threat_reason = event.get('reason', 'AI analysis in progress...')
+        threat_confidence = event.get('confidence', 0)
+        threat_indicators = event.get('indicators', [])
         
         if decision['requires_approval']:
             threat.status = ThreatStatus.PENDING
@@ -125,7 +146,10 @@ class DashboardState:
                     "timestamp": threat.timestamp.isoformat(),
                     "status": "PENDING_APPROVAL",
                     "attack_pattern": threat.attack_pattern,
-                    "explanation": threat.explanation
+                    "explanation": threat.explanation,
+                    "reason": threat_reason,
+                    "confidence": threat_confidence,
+                    "indicators": threat_indicators
                 }
             })
             
@@ -146,7 +170,15 @@ class DashboardState:
         if len(self.threats) > 50:
             self.threats = self.threats[-50:]
         
-        await self.broadcast({"type": "threat", "data": threat.to_dict()})
+        threat_dict = threat.to_dict()
+        threat_dict['reason'] = threat_reason
+        threat_dict['confidence'] = threat_confidence
+        threat_dict['indicators'] = threat_indicators
+
+        # SAVE TO DATABASE
+        db.save_threat(threat_dict)
+
+        await self.broadcast({"type": "threat", "data": threat_dict})
     
     async def broadcast_pipeline(self, stage: int, data: Dict):
         self.pipeline_state = {"stage": stage, "threat_id": data.get('id', 'unknown')}
@@ -284,6 +316,12 @@ async def get_logs(limit: int = 50):
     return state.logs[-limit:]
 
 
+# NEW: Fetch ALL historical logs from database for fullscreen viewer
+@app.get("/api/logs/all")
+async def get_all_logs():
+    return db.load_logs(limit=1000)
+
+
 @app.post("/api/threats/{threat_id}/approve")
 async def approve_threat(threat_id: str):
     print(f"[HTTP] APPROVE received for: {threat_id}")
@@ -347,12 +385,23 @@ async def dismiss_threat(threat_id: str):
 async def inject_test_event():
     event = {
         "source": "WATCHER",
-        "type": "BRUTE_FORCE",
+        "type": "DNS_TUNNELING",
         "severity": 9,
         "source_ip": "185.220.101.47",
-        "raw_log": "Failed password for root from 185.220.101.47 port 22 ssh2",
-        "timestamp": "2026-06-26T00:00:00",
-        "message": "SSH brute force detected"
+        "raw_log": "DNS query: aHR0cHM6Ly9tYWx3YXJlLmNvbQ==.bad-domain.biz from 185.220.101.47",
+        "timestamp": "2026-06-27T00:00:00",
+        "message": "Suspicious DNS tunneling detected",
+        "reason": "High-volume DNS queries to newly registered domain 'bad-domain.biz' with base64-encoded subdomains. 4,847 queries in 12 minutes averaging 3.2KB per query — consistent with data exfiltration. Domain registered 3 days ago via anonymous registrar. No legitimate business relationship.",
+        "confidence": 97.4,
+        "indicators": [
+            "4,847 DNS queries in 12 minutes",
+            "Base64-encoded subdomains (3.2KB payload avg)",
+            "Domain age: 3 days (suspiciously new)",
+            "Anonymous registrar (privacy-protected)",
+            "Off-hours activity (02:00-03:00 local time)",
+            "No MX/SPF records — not a mail server",
+            "Query pattern: beacon-like intervals"
+        ]
     }
     
     print(f"[TEST] Injecting via API. Clients: {len(state.clients)}")
@@ -362,20 +411,89 @@ async def inject_test_event():
 
 @app.post("/api/test/inject-auto")
 async def inject_test_event_auto():
-    """Inject a medium-high threat that auto-contains (severity 7)"""
     event = {
         "source": "WATCHER",
-        "type": "PORT_SCAN",
+        "type": "FILE_ANOMALY",
         "severity": 7,
-        "source_ip": "192.168.1.100",
-        "raw_log": "Mass port scan detected from 192.168.1.100: 200 ports in 5s",
-        "timestamp": "2026-06-26T00:00:00",
-        "message": "Aggressive port scan detected"
+        "source_ip": "192.168.1.105",
+        "raw_log": "File created: /tmp/.update.sh (SHA256: 8f3b2c...) by user www-data",
+        "timestamp": "2026-06-27T00:00:00",
+        "message": "Malicious payload dropped in temp directory",
+        "reason": "Executable shell script dropped in /tmp by web server process (www-data). File masquerades as system update but contains obfuscated curl commands to C2 server. SHA256 matches known Cobalt Strike beacon (confidence: 97.4%). File permissions: 777 (world-executable). Parent process: apache2 worker.",
+        "confidence": 97.4,
+        "indicators": [
+            "Executable in /tmp by www-data (unusual)",
+            "Masquerades as '.update.sh' (hidden file)",
+            "SHA256 matches Cobalt Strike beacon",
+            "Contains obfuscated curl to external IP",
+            "Permissions: 777 (world-executable)",
+            "Parent process: apache2 (web server)",
+            "No corresponding package manager activity"
+        ]
     }
     
     print(f"[TEST-AUTO] Injecting auto-contain event. Clients: {len(state.clients)}")
     await state.process_event(event)
     return {"status": "injected", "clients": len(state.clients), "mode": "auto_contain"}
+
+
+@app.post("/api/test/inject-lateral")
+async def inject_lateral_movement():
+    """Simulate advanced persistent threat — lateral movement"""
+    event = {
+        "source": "WATCHER",
+        "type": "SUSPICIOUS_LOGIN",
+        "severity": 8,
+        "source_ip": "10.0.0.45",
+        "raw_log": "Successful RDP login from 10.0.0.45 to DC-01 at 03:17 AM using svc_backup account",
+        "timestamp": "2026-06-27T00:00:00",
+        "message": "Lateral movement detected — privileged account misuse",
+        "reason": "Service account 'svc_backup' used for interactive RDP session at 03:17 AM — violates least-privilege policy. Account should only run automated backups. Source IP (10.0.0.45) is workstation WS-12, not backup server. Login followed by PSExec execution on 3 domain controllers within 4 minutes. Pattern matches APT29 (Cozy Bear) lateral movement technique.",
+        "confidence": 94.2,
+        "indicators": [
+            "Service account used interactively (03:17 AM)",
+            "RDP from workstation (not backup server)",
+            "PSExec executed on 3 DCs post-login",
+            "Mimikatz artifacts in memory",
+            "Kerberoasting detected 12 minutes later",
+            "No change ticket for this activity",
+            "Matches APT29 TTP (MITRE ATT&CK T1021.002)"
+        ]
+    }
+    
+    print(f"[TEST-LATERAL] Injecting lateral movement. Clients: {len(state.clients)}")
+    await state.process_event(event)
+    return {"status": "injected", "clients": len(state.clients), "mode": "lateral"}
+
+
+@app.post("/api/test/inject-ransomware")
+async def inject_ransomware():
+    """Simulate ransomware behavior"""
+    event = {
+        "source": "WATCHER",
+        "type": "FILE_ANOMALY",
+        "severity": 10,
+        "source_ip": "192.168.1.50",
+        "raw_log": "Mass file modification: 14,203 files renamed to .locked extension in /srv/shares",
+        "timestamp": "2026-06-27T00:00:00",
+        "message": "RANSOMWARE DETECTED — Mass encryption in progress",
+        "reason": "Rapid mass file encryption detected on network shares. 14,203 files renamed to .locked extension in 47 seconds. Read/write ratio: 1:847 (abnormal). Shadow copies deleted via vssadmin. Ransom note 'RECOVER_INSTRUCTIONS.html' dropped in 23 directories. File entropy analysis: 7.98/8.0 (strongly encrypted). Bitcoin wallet in note: bc1q...xyz.",
+        "confidence": 99.1,
+        "indicators": [
+            "14,203 files encrypted in 47 seconds",
+            ".locked extension (LockBit 3.0 signature)",
+            "Shadow copies deleted (vssadmin)",
+            "Ransom note dropped in 23 directories",
+            "File entropy: 7.98/8.0 (encrypted)",
+            "Bitcoin wallet in ransom note",
+            "SMBv1 exploited (EternalBlue vector)",
+            "No backup verification in 72 hours"
+        ]
+    }
+    
+    print(f"[TEST-RANSOMWARE] Injecting ransomware event. Clients: {len(state.clients)}")
+    await state.process_event(event)
+    return {"status": "injected", "clients": len(state.clients), "mode": "ransomware"}
 
 
 if __name__ == "__main__":

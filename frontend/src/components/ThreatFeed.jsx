@@ -1,6 +1,6 @@
 import React, { useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { AlertTriangle, ShieldAlert, Terminal, Globe, FileWarning } from 'lucide-react'
+import { AlertTriangle, ShieldAlert, Terminal, Globe, FileWarning, Brain } from 'lucide-react'
 import { useDashboard } from '../context/DashboardContext.jsx'
 
 const THREAT_ICONS = {
@@ -27,6 +27,7 @@ const SEVERITY_CONFIG = {
 }
 
 const ThreatCard = ({ threat }) => {
+    console.log('[THREAT CARD]', threat.id, 'reason:', threat.reason, 'confidence:', threat.confidence);
     const Icon = THREAT_ICONS[threat.type] || AlertTriangle
     const config = SEVERITY_CONFIG[threat.severity] || SEVERITY_CONFIG[5]
 
@@ -88,6 +89,38 @@ const ThreatCard = ({ threat }) => {
                 >
                     <div className="w-1.5 h-1.5 rounded-full bg-contain-green" />
                     <span className="text-[10px] font-mono text-contain-green font-bold tracking-wider">CONTAINED</span>
+                </motion.div>
+            )}
+            {/* NEW: AI Reason Badge */}
+            {threat.reason && (
+                <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    transition={{ duration: 0.3 }}
+                    className="mt-2 p-2 rounded bg-neon-cyan/5 border border-neon-cyan/20"
+                >
+                    <div className="flex items-center gap-1.5 mb-1">
+                        <Brain size={10} className="text-neon-cyan" />
+                        <span className="text-[9px] font-mono text-neon-cyan uppercase tracking-wider">AI Reason</span>
+                    </div>
+                    <p className="text-[10px] font-mono text-data-white/70 leading-relaxed">
+                        {threat.reason}
+                    </p>
+
+                    {/* Confidence Score */}
+                    {threat.confidence && (
+                        <div className="mt-1.5 flex items-center gap-2">
+                            <div className="flex-1 h-1 bg-panel-border rounded-full overflow-hidden">
+                                <motion.div
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${threat.confidence}%` }}
+                                    transition={{ duration: 1, delay: 0.3 }}
+                                    className={`h-full rounded-full ${threat.confidence > 90 ? 'bg-contain-green' : threat.confidence > 70 ? 'bg-warning-amber' : 'bg-alert-red'}`}
+                                />
+                            </div>
+                            <span className="text-[9px] font-mono text-data-white/40">{threat.confidence}% confidence</span>
+                        </div>
+                    )}
                 </motion.div>
             )}
         </motion.div>

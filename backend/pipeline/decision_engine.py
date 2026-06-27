@@ -61,7 +61,17 @@ class DecisionEngine:
                 'auto_execute': False,
                 'reason': f'Severity {severity}: Human approval required'
             }
-        
+
+        # CRITICAL: Severity 10+ always requires immediate lockdown
+        elif severity >= 10:
+            self.stats['pending'] += 1
+            return {
+                'action': 'LOCKDOWN',
+                'requires_approval': True,
+                'auto_execute': False,
+                'reason': f'Severity {severity}: CRITICAL — Immediate lockdown required'
+            }
+
         return {
             'action': 'ALERT',
             'requires_approval': False,
