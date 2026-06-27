@@ -18,8 +18,8 @@ WATCHED_LOGS = [
 ]
 
 # Network Config
-NETWORK_INTERFACE = "eth0"  # Change to your interface: wlan0, ens33, etc.
-PORT_SCAN_THRESHOLD = 50
+NETWORK_INTERFACE = "eth0"
+PORT_SCAN_THRESHOLD = 20
 DNS_TUNNEL_DOMAINS = [".tk", ".ml", ".ga", ".cf"]
 
 # File System Config
@@ -50,6 +50,6 @@ API_HOST = "0.0.0.0"
 API_PORT = 8000
 WS_PING_INTERVAL = 20
 
-# Demo Mode
-DEMO_MODE = True
+# Demo Mode - DISABLED for production
+DEMO_MODE = False
 DEMO_INTERVAL = 15

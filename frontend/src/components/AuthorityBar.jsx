@@ -71,6 +71,18 @@ const AuthorityBar = () => {
                 </div>
                 <div className="h-6 w-px bg-panel-border mx-2" />
                 <span className="text-[10px] text-data-white/20 font-mono">v1.0.0-BETA</span>
+
+                {/* LIVE MONITORING BADGE */}
+                <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-contain-green/10 border border-contain-green/30 ml-3">
+                    <motion.div
+                        animate={{ scale: [1, 1.3, 1], opacity: [1, 0.7, 1] }}
+                        transition={{ duration: 1.5, repeat: Infinity }}
+                        className="w-1.5 h-1.5 rounded-full bg-contain-green"
+                    />
+                    <span className="text-[9px] font-mono text-contain-green font-bold tracking-wider">
+                        LIVE
+                    </span>
+                </div>
             </div>
 
             {/* Center: Telemetry - REAL DATA */}
@@ -134,8 +146,8 @@ const AuthorityBar = () => {
                 <button
                     onClick={() => setAutoMode(!autoMode)}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-md border transition-all duration-300 ${autoMode
-                            ? 'bg-contain-green/10 border-contain-green/30 text-contain-green'
-                            : 'bg-warning-amber/10 border-warning-amber/30 text-warning-amber'
+                        ? 'bg-contain-green/10 border-contain-green/30 text-contain-green'
+                        : 'bg-warning-amber/10 border-warning-amber/30 text-warning-amber'
                         }`}
                 >
                     <Power size={14} />
