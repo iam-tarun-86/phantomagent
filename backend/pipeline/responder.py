@@ -31,8 +31,8 @@ class Responder:
         
         try:
             if action in ['CONTAIN', 'LOCKDOWN']:
-                # Block IP
-                if ip != 'unknown' and ip != 'local':
+                # Block IP (skip localhost and private networks)
+                if ip != 'unknown' and ip != 'local' and ip != '127.0.0.1' and not ip.startswith('192.168.') and not ip.startswith('10.'):
                     await self._block_ip(ip)
                     results['actions_taken'].append(f'Blocked IP: {ip}')
                 

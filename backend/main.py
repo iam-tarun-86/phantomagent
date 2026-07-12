@@ -494,7 +494,25 @@ async def inject_ransomware():
     print(f"[TEST-RANSOMWARE] Injecting ransomware event. Clients: {len(state.clients)}")
     await state.process_event(event)
     return {"status": "injected", "clients": len(state.clients), "mode": "ransomware"}
-
+@app.get("/api/connections")
+async def get_connections():
+    """Get real-time network connections from the system"""
+    import psutil
+    connections = []
+    
+    try:
+        for conn in psutil.net_connections(kind='inet'):
+            if conn.status == 'ESTABLISHED' and conn.raddr:
+                connections.append({
+                    "ip": conn.raddr.ip,
+                    "port": conn.raddr.port,
+                    "status": conn.status,
+                    "direction": "outbound" if conn.laddr and conn.laddr.port > 1024 else "inbound"
+                })
+    except Exception as e:
+        print(f"[CONNECTIONS] Error: {e}")
+    
+    return connections[:20]
 
 if __name__ == "__main__":
     import uvicorn

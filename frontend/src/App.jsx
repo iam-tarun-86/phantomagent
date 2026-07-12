@@ -6,6 +6,7 @@ import ThreatFeed from './components/ThreatFeed'
 import AttackMap from './components/AttackMap'
 import KillChain from './components/KillChain'
 import TerminalStream from './components/TerminalStream'
+import LiveConnections from './components/LiveConnections'  // NEW IMPORT
 import RedAlertModal from './components/RedAlertModal'
 
 function App() {
@@ -30,9 +31,12 @@ function App() {
 
       <div className="px-4 py-4 h-[calc(100vh-4rem)] flex flex-col gap-4">
         <div className="flex-1 flex gap-4 min-h-0">
-          <div className="w-[25%] min-w-[280px]"><ThreatFeed /></div>
+          <div className="w-[22%] min-w-[260px]"><ThreatFeed /></div>
           <div className="flex-1 min-w-0"><AttackMap /></div>
-          <div className="w-[20%] min-w-[220px]"><KillChain /></div>
+          <div className="w-[18%] min-w-[200px] flex flex-col gap-3">
+            <KillChain />
+            <LiveConnections />  {/* NEW: Live Connections Panel */}
+          </div>
         </div>
         <div className="h-[22%] min-h-[180px]"><TerminalStream /></div>
       </div>
