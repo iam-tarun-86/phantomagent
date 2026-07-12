@@ -1,7 +1,7 @@
 # 🛡️ PhantomAgent
 
 > **Autonomous AI-Powered Security Operations Dashboard**  
-> Real-Time Network Watchers • Local Qwen 3.5 Threat Classification • Autonomous Containment Pipeline • Retro Cyber-Themed React Frontend
+> Real-Time Network Watchers • Local Gemma 2 9B Threat Classification • Autonomous Containment Pipeline • Retro Cyber-Themed React Frontend
 
 ---
 
@@ -22,7 +22,7 @@ Built with a high-performance **FastAPI** backend and a responsive, retro-cyber 
 
 ## 🏗️ Architecture & Pipeline Lifecycle
 
-PhantomAgent operates as a multi-stage security pipeline. Events are passively gathered by OS-level watchers, passed through a rule-based pre-filter to drop background noise, analyzed by a local instance of the **Qwen 3.5 (8B)** LLM, and routed by a decision engine based on severity thresholds.
+PhantomAgent operates as a multi-stage security pipeline. Events are passively gathered by OS-level watchers, passed through a rule-based pre-filter to drop background noise, analyzed by a local instance of the **Gemma 2 9B** LLM (running via **llama.cpp**), and routed by a decision engine based on severity thresholds.
 
 ```mermaid
 graph TD
@@ -43,7 +43,7 @@ graph TD
     PF --> |Raw Log Broadcast| WS[WebSocket Server]
 
     %% AI Pipeline
-    PF --> |Flagged Threat| QE[Qwen 3.5 AI Engine / Fallback]
+    PF --> |Flagged Threat| QE[Gemma 2 9B AI Engine / Fallback]
     QE --> |Analysis JSON: Severity, Attack Pattern, Indicators, Confidence| DE[Decision Engine]
 
     %% Decision Engine Routing
@@ -72,7 +72,7 @@ graph TD
 | :--- | :--- | :--- |
 | **Stage 0** | **Detection Watchers** | System-level loops monitoring auth logs, folder changes, and live network sockets. |
 | **Stage 1** | **Pre-Filter Engine** | Deterministic rule matching to filter out background operating system noise. |
-| **Stage 2** | **Qwen AI Classifier** | Interrogates local **Ollama** using the `qwen3:8b` model to parse logs, map to attack patterns, and score confidence. |
+| **Stage 2** | **Gemma AI Classifier** | Interrogates local **llama.cpp** using the `gemma-2-9b` model to parse logs, map to attack patterns, and score confidence. |
 | **Stage 3** | **Decision Engine** | Routes action pathways based on severity metrics: Log, Alert, Contain, or Lockdown. |
 | **Stage 4** | **Containment Responder** | Invokes mitigation scripts (IP blocking, process termination, folder locking) and compiles forensic case files. |
 
@@ -96,7 +96,7 @@ graph TD
 ### Backend
 *   **FastAPI**: Asynchronous web frameworks handling HTTP endpoints and WebSocket routing.
 *   **SQLite**: Local database persistent repository for threat metrics and system-level events.
-*   **Ollama (Qwen 3.5)**: Offline artificial intelligence reasoning for explaining and parsing raw logs.
+*   **llama.cpp (Gemma 2 9B)**: Offline artificial intelligence reasoning for explaining and parsing raw logs.
 *   **psutil & Watchdog**: Local machine packet counting, socket mapping, and file folder integrity auditing.
 
 ### Frontend
@@ -113,7 +113,7 @@ graph TD
 *   Python 3.10+
 *   Node.js 18+
 *   npm or yarn
-*   Ollama (Optional, for offline AI classification)
+*   llama.cpp (Optional, for offline AI classification)
 
 ### 1. Clone the Repository
 ```bash
@@ -121,14 +121,14 @@ git clone https://github.com/yourusername/phantomagent-dashboard.git
 cd phantomagent-dashboard
 ```
 
-### 2. Configure Ollama & Qwen3 (Optional)
-To run local AI classification, ensure Ollama is installed and operational on your machine:
+### 2. Configure llama.cpp & Gemma 2 9B (Optional)
+To run local AI classification, configure **llama.cpp** and download the Gemma 2 9B GGUF model:
 ```bash
-# Verify ollama is running, then pull the model
-ollama pull qwen3:8b
+# Start your llama.cpp server with the Gemma 2 9B model
+./llama-server -m gemma-2-9b-it.Q4_K_M.gguf -c 4096 --port 8085
 ```
 > [!NOTE]  
-> If the Ollama server is offline or the model is missing, the backend seamlessly routes threat logs to a rule-based fallback classification matrix without failing.
+> If the llama.cpp server is offline or the model is missing, the backend seamlessly routes threat logs to a rule-based fallback classification matrix without failing.
 
 ### 3. Backend Deployment
 Initialize the Python virtual environment and run the main application:
@@ -261,10 +261,10 @@ PORT_SCAN_THRESHOLD = 20
 # Directory Protection Integrity
 WATCHED_PATHS = ["/tmp", "/var/tmp"]
 
-# Local Ollama AI Settings
-QWEN_MODEL = "qwen3:8b"
-QWEN_API_URL = "http://localhost:8085/api/generate"
-QWEN_TIMEOUT = 30  # Seconds
+# Local llama.cpp AI Settings
+MODEL_NAME = "gemma-2-9b"
+API_URL = "http://localhost:8085/completion"
+TIMEOUT = 30  # Seconds
 ```
 
 ---
@@ -295,8 +295,8 @@ QWEN_TIMEOUT = 30  # Seconds
 
 *   **`405 Method Not Allowed` when injecting events**:  
     Make sure to send a `POST` request, not a `GET` request. Example: `curl -X POST http://localhost:8000/api/test/inject`.
-*   **`No model found 'qwen3:8b'`**:  
-    Ensure you pulled the correct model: `ollama pull qwen3:8b`. If you want to use a different model, update `QWEN_MODEL` in `backend/config.py`.
+*   **`llama.cpp server not responding`**:  
+    Ensure you have started your llama.cpp server: `./llama-server -m gemma-2-9b-it.Q4_K_M.gguf -c 4096 --port 8085`.
 *   **`iptables: Permission denied` on containment**:  
     IP blocking requires root permissions (`sudo`). If running without privileges, the responder logs a warning and uses a mock container.
 *   **Browser blocked the audio alarm**:  
@@ -309,7 +309,7 @@ QWEN_TIMEOUT = 30  # Seconds
 *   [Tailwind CSS v4](https://tailwindcss.com) for structural styling
 *   [Framer Motion](https://www.framer.com/motion/) for animations
 *   [FastAPI](https://fastapi.tiangolo.com) for real-time endpoints
-*   [Ollama & Qwen](https://ollama.com) for the local classification engine
+*   [llama.cpp](https://github.com/ggerganov/llama.cpp) and [Google Gemma](https://ai.google.dev/gemma) for the local classification engine
 
 ---
 

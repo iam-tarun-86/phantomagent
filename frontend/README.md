@@ -37,7 +37,7 @@
 The only autonomous security tool that **asks before acting**. High-impact actions (Severity 9-10) enter a **pending approval** state — enterprise-ready by design.
 
 ### 🧠 Local LLM Analysis
-- **Qwen 3.5 9B** via llama.cpp (GGUF quantized)
+- **Gemma 2 9B** via llama.cpp (GGUF quantized)
 - **42 tok/sec** inference speed
 - **8GB RAM friendly** — runs on a gaming laptop
 - **Zero internet** — complete air-gapped operation
@@ -81,7 +81,7 @@ The only autonomous security tool that **asks before acting**. High-impact actio
 **5-Layer Pipeline:**
 1. **Watcher Layer** — Log + Network + File watchers (parallel, event-triggered)
 2. **Pre-Filter** — Rule engine kills 99% noise instantly
-3. **Qwen 3.5 9B** — Always-warm local LLM classifies threats
+3. **Gemma 2 9B** — Always-warm local LLM classifies threats
 4. **Decision Engine** — Severity-based action routing
 5. **Responder** — Executes containment + forensic snapshot
 
@@ -91,7 +91,7 @@ The only autonomous security tool that **asks before acting**. High-impact actio
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **AI Core** | Qwen 3.5 9B (llama.cpp) | Threat classification |
+| **AI Core** | Gemma 2 9B (llama.cpp) | Threat classification |
 | **Watchers** | Python + Watchdog/Scapy/psutil | Event detection |
 | **Pre-Filter** | Python rule engine | Noise reduction |
 | **Backend** | FastAPI | REST API + async queue |
@@ -143,15 +143,10 @@ uvicorn main:app --reload
 
 ### Local LLM Setup
 
+Configure **llama.cpp** and download the Gemma 2 9B GGUF model:
 ```bash
-# Install Ollama
-# https://ollama.com
-
-# Pull Qwen 3.5
-ollama pull qwen3:8b
-
-# Verify it's running
-ollama run qwen3:8b
+# Start your llama.cpp server with the Gemma 2 9B model
+./llama-server -m gemma-2-9b-it.Q4_K_M.gguf -c 4096 --port 8085
 ```
 
 ---
@@ -261,9 +256,8 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgments
 
-- **Qwen** by Alibaba Cloud for the incredible 3.5 9B model
+- **Gemma 2 9B** by Google for the model weights
 - **llama.cpp** by Georgi Gerganov for efficient local inference
-- **Ollama** for making LLM deployment accessible
 - **Confluence 2.0** for the platform to showcase this vision
 
 ---
