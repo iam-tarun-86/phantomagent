@@ -37,7 +37,7 @@
 The only autonomous security tool that **asks before acting**. High-impact actions (Severity 9-10) enter a **pending approval** state — enterprise-ready by design.
 
 ### 🧠 Local LLM Analysis
-- **Gemma 2 9B** via llama.cpp (GGUF quantized)
+- **Gemma 4 E4B** via llama.cpp (GGUF quantized)
 - **42 tok/sec** inference speed
 - **8GB RAM friendly** — runs on a gaming laptop
 - **Zero internet** — complete air-gapped operation
@@ -81,7 +81,7 @@ The only autonomous security tool that **asks before acting**. High-impact actio
 **5-Layer Pipeline:**
 1. **Watcher Layer** — Log + Network + File watchers (parallel, event-triggered)
 2. **Pre-Filter** — Rule engine kills 99% noise instantly
-3. **Gemma 2 9B** — Always-warm local LLM classifies threats
+3. **Gemma 4 E4B** — Always-warm local LLM classifies threats
 4. **Decision Engine** — Severity-based action routing
 5. **Responder** — Executes containment + forensic snapshot
 
@@ -91,7 +91,7 @@ The only autonomous security tool that **asks before acting**. High-impact actio
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **AI Core** | Gemma 2 9B (llama.cpp) | Threat classification |
+| **AI Core** | Gemma 4 E4B (llama.cpp) | Threat classification |
 | **Watchers** | Python + Watchdog/Scapy/psutil | Event detection |
 | **Pre-Filter** | Python rule engine | Noise reduction |
 | **Backend** | FastAPI | REST API + async queue |
@@ -143,10 +143,10 @@ uvicorn main:app --reload
 
 ### Local LLM Setup
 
-Configure **llama.cpp** and download the Gemma 2 9B GGUF model:
+Configure **llama.cpp** and download the Gemma 4 E4B GGUF model:
 ```bash
-# Start your llama.cpp server with the Gemma 2 9B model
-./llama-server -m gemma-2-9b-it.Q4_K_M.gguf -c 4096 --port 8085
+# Start your llama.cpp server with the Gemma 4 E4B model
+./llama-server -m gemma-4-e4b-it.Q4_K_M.gguf -c 4096 --port 8085
 ```
 
 ---
@@ -256,7 +256,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgments
 
-- **Gemma 2 9B** by Google for the model weights
+- **Gemma 4 E4B** by Google for the model weights
 - **llama.cpp** by Georgi Gerganov for efficient local inference
 - **Confluence 2.0** for the platform to showcase this vision
 
