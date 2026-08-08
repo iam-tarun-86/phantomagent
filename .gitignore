@@ -50,3 +50,4 @@ Thumbs.db
 
 # App Data
 backend/data/forensic_*.txt
+.freebuff/
