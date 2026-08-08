@@ -59,6 +59,8 @@ class NetworkWatcher:
                     if conn.status == 'ESTABLISHED' or conn.status == 'SYN_SENT':
                         if conn.raddr:
                             ip = conn.raddr.ip
+                            if ip in ('127.0.0.1', '::1', 'localhost'):
+                                continue
                             port = conn.raddr.port
                             current_connections.add((ip, port))
                             
@@ -98,6 +100,8 @@ class NetworkWatcher:
         for conn in psutil.net_connections(kind='inet'):
             if conn.raddr:
                 ip = conn.raddr.ip
+                if ip in ('127.0.0.1', '::1', 'localhost'):
+                    continue
                 ip_counts[ip] = ip_counts.get(ip, 0) + 1
 
         # Alert on high connection counts
