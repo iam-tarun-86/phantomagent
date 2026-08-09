@@ -40,7 +40,7 @@ export const DashboardProvider = ({ children }) => {
         cpu: 12,
         ram: 4.2,
         vram: 5.8,
-        qwen_status: 'WARM',
+        gemma_status: 'WARM',
         threats_blocked: 47,
         uptime: '0d 0h 0m'
     });
@@ -115,6 +115,11 @@ export const DashboardProvider = ({ children }) => {
             wsService.on('log', (d) => setLogs(prev => [...prev, d].slice(-50))),
             wsService.on('telemetry', (d) => setTelemetry(d)),
             wsService.on('pipeline', (d) => setPipeline(d)),
+
+            wsService.on('clear_logs', () => {
+                setLogs([]);
+                setThreats([]);
+            }),
 
             wsService.on('alert', (d) => {
                 setAlert(null);
@@ -207,10 +212,14 @@ export const DashboardProvider = ({ children }) => {
         }
     }, []);
 
+    const clearLogs = useCallback(() => {
+        setLogs([]);
+    }, []);
+
     return (
         <DashboardContext.Provider value={{
             threats, logs, telemetry, pipeline, alert, isConnected,
-            approveThreat, dismissThreat
+            approveThreat, dismissThreat, clearLogs
         }}>
             {children}
         </DashboardContext.Provider>

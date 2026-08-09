@@ -14,18 +14,19 @@ class SuspiciousFileHandler(FileSystemEventHandler):
     SUSPICIOUS_EXTENSIONS = {'.sh', '.py', '.exe', '.bin', '.elf'}
     SUSPICIOUS_PATHS = {'/tmp', '/var/tmp', '/dev/shm'}
     
-    def __init__(self, callback: Callable):
+    def __init__(self, callback: Callable, loop: asyncio.AbstractEventLoop):
         self.callback = callback
+        self.loop = loop
     
     def on_created(self, event):
         if event.is_directory:
             return
-        asyncio.create_task(self._check_file(event.src_path, "created"))
+        asyncio.run_coroutine_threadsafe(self._check_file(event.src_path, "created"), self.loop)
     
     def on_modified(self, event):
         if event.is_directory:
             return
-        asyncio.create_task(self._check_file(event.src_path, "modified"))
+        asyncio.run_coroutine_threadsafe(self._check_file(event.src_path, "modified"), self.loop)
     
     async def _check_file(self, path: str, action: str):
         """Check if file is suspicious"""
@@ -60,7 +61,8 @@ class FileWatcher:
     def start(self):
         """Start file watching"""
         self.running = True
-        handler = SuspiciousFileHandler(self.callback)
+        loop = asyncio.get_running_loop()
+        handler = SuspiciousFileHandler(self.callback, loop)
         
         for path in self.paths:
             if Path(path).exists():

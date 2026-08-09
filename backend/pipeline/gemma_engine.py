@@ -1,13 +1,13 @@
-"""Qwen 3.5 local LLM integration"""
+"""Gemma local LLM integration"""
 
 import json
 import aiohttp
 from typing import Dict, Any
-from backend.config import QWEN_API_URL, QWEN_MODEL, QWEN_TIMEOUT
+from backend.config import GEMMA_API_URL, GEMMA_MODEL, GEMMA_TIMEOUT
 
 
-class QwenEngine:
-    """Local Qwen 3.5 analysis engine"""
+class GemmaEngine:
+    """Local Gemma analysis engine"""
     
     SYSTEM_PROMPT = """You are an elite cybersecurity analyst. Analyze this security event and respond ONLY in valid JSON format with these exact fields:
 {
@@ -36,27 +36,24 @@ Rules:
         self.is_available = False
     
     async def initialize(self):
-        """Check if Qwen is available"""
+        """Check if Gemma is available"""
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get("http://localhost:8085/api/tags", timeout=5) as resp:
+                # llama.cpp default health check endpoint
+                health_url = GEMMA_API_URL.replace("/v1/chat/completions", "/health")
+                async with session.get(health_url, timeout=5) as resp:
                     if resp.status == 200:
-                        data = await resp.json()
-                        models = [m['name'] for m in data.get('models', [])]
-                        if any('qwen' in m for m in models):
-                            self.is_available = True
-                            print(f"[QWEN] Connected to Ollama. Models: {models}")
-                        else:
-                            print("[QWEN] Qwen model not found. Run: ollama pull qwen3:8b")
+                        self.is_available = True
+                        print(f"[GEMMA] Connected to llama.cpp.")
                     else:
-                        print("[QWEN] Ollama not responding. Using fallback analysis.")
+                        print("[GEMMA] llama.cpp not responding. Using fallback analysis.")
         except Exception as e:
-            print(f"[QWEN] Cannot connect to Ollama: {e}")
-            print("[QWEN] Using rule-based fallback analysis.")
+            print(f"[GEMMA] Cannot connect to llama.cpp: {e}")
+            print("[GEMMA] Using rule-based fallback analysis.")
     
     async def analyze(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Analyze a security event with Qwen or fallback.
+        Analyze a security event with Gemma or fallback.
         """
         if not self.is_available:
             return self._fallback_analysis(event)
@@ -66,20 +63,25 @@ Rules:
             
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    QWEN_API_URL,
+                    GEMMA_API_URL,
                     json={
-                        "model": QWEN_MODEL,
-                        "prompt": prompt,
-                        "system": self.SYSTEM_PROMPT,
-                        "stream": False,
-                        "format": "json"
+                        "messages": [
+                            {"role": "system", "content": self.SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.1,
+                        "response_format": {"type": "json_object"}
                     },
-                    timeout=aiohttp.ClientTimeout(total=QWEN_TIMEOUT)
+                    timeout=aiohttp.ClientTimeout(total=GEMMA_TIMEOUT)
                 ) as resp:
                     
                     if resp.status == 200:
                         data = await resp.json()
-                        response_text = data.get('response', '{}')
+                        choices = data.get('choices', [])
+                        if choices:
+                            response_text = choices[0].get('message', {}).get('content', '{}')
+                        else:
+                            response_text = '{}'
                         
                         # Parse JSON response
                         try:
@@ -95,18 +97,18 @@ Rules:
                                 "confidence": float(analysis.get('confidence', 85.0)),
                                 "indicators": analysis.get('indicators', ['Pattern match detected']),
                                 # ==========================
-                                "source": "QWEN",
+                                "source": "GEMMA",
                                 "ai_confidence": "HIGH"
                             }
                         except json.JSONDecodeError:
-                            print(f"[QWEN] Invalid JSON response: {response_text}")
+                            print(f"[GEMMA] Invalid JSON response: {response_text}")
                             return self._fallback_analysis(event)
                     else:
-                        print(f"[QWEN] API error: {resp.status}")
+                        print(f"[GEMMA] API error: {resp.status}")
                         return self._fallback_analysis(event)
                         
         except Exception as e:
-            print(f"[QWEN] Analysis error: {e}")
+            print(f"[GEMMA] Analysis error: {e}")
             return self._fallback_analysis(event)
     
     def _build_prompt(self, event: Dict[str, Any]) -> str:
@@ -122,7 +124,7 @@ Pre-filter Severity: {event.get('prefilter_severity', 'Unknown')}
 Respond with JSON only. Include detailed reason, confidence score (0-100), and specific indicators."""
     
     def _fallback_analysis(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """Rule-based fallback when Qwen is unavailable"""
+        """Rule-based fallback when Gemma is unavailable"""
         event_type = event.get('type', 'UNKNOWN')
         prefilter_sev = event.get('prefilter_severity', 5)
         source_ip = event.get('source_ip', 'Unknown')

@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Terminal, Maximize2 } from 'lucide-react'
+import { Terminal, Maximize2, Trash2 } from 'lucide-react'
 import { useDashboard } from '../context/DashboardContext.jsx'
 import FullscreenLogViewer from './FullscreenLogViewer'
 
@@ -67,7 +67,7 @@ const LogEntry = ({ log, index }) => {
 };
 
 const TerminalStream = () => {
-    const { logs } = useDashboard()
+    const { logs, clearLogs } = useDashboard()
     const scrollRef = useRef(null)
     const [showFullscreen, setShowFullscreen] = useState(false)
 
@@ -79,12 +79,19 @@ const TerminalStream = () => {
 
     return (
         <>
-            <div className="h-full flex flex-col">
+            <div className="h-full flex flex-col glass-panel p-3">
                 <div className="flex items-center gap-2 mb-3 px-1">
                     <Terminal size={16} className="text-neon-cyan" />
                     <span className="text-sm font-mono font-bold tracking-wider text-data-white">SYSTEM LOGS</span>
                     <div className="flex-1" />
                     <span className="text-[10px] font-mono text-data-white/30 mr-2">{logs.length} ENTRIES</span>
+                    <button
+                        onClick={clearLogs}
+                        className="p-1.5 rounded hover:bg-panel-border text-data-white/40 hover:text-alert-red transition-colors"
+                        title="Clear Logs"
+                    >
+                        <Trash2 size={14} />
+                    </button>
                     <button
                         onClick={() => setShowFullscreen(true)}
                         className="p-1.5 rounded hover:bg-panel-border text-data-white/40 hover:text-neon-cyan transition-colors"

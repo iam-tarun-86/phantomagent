@@ -6,7 +6,7 @@ import { useDashboard } from '../context/DashboardContext.jsx'
 const CHAIN_NODES = [
   { id: 'watcher', label: 'Network Watcher', icon: Eye, color: 'text-blue-400' },
   { id: 'prefilter', label: 'Pre-Filter', icon: Filter, color: 'text-purple-400' },
-  { id: 'qwen', label: 'Qwen 3.5', icon: Brain, color: 'text-neon-cyan' },
+  { id: 'qwen', label: 'Gemma', icon: Brain, color: 'text-neon-cyan' },
   { id: 'decision', label: 'Decision Engine', icon: Scale, color: 'text-warning-amber' },
   { id: 'response', label: 'Response', icon: ShieldCheck, color: 'text-contain-green' },
 ]

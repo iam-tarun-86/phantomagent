@@ -26,25 +26,7 @@ class DecisionEngine:
         action = analysis.get('action', 'ALERT')
         
         # Route by severity
-        if SEVERITY_THRESHOLDS['LOG'][0] <= severity <= SEVERITY_THRESHOLDS['LOG'][1]:
-            self.stats['logged'] += 1
-            return {
-                'action': 'LOG',
-                'requires_approval': False,
-                'auto_execute': False,
-                'reason': f'Severity {severity}: Log for review'
-            }
-        
-        elif SEVERITY_THRESHOLDS['ALERT'][0] <= severity <= SEVERITY_THRESHOLDS['ALERT'][1]:
-            self.stats['alerted'] += 1
-            return {
-                'action': 'ALERT',
-                'requires_approval': False,
-                'auto_execute': False,
-                'reason': f'Severity {severity}: Alert operators'
-            }
-        
-        elif SEVERITY_THRESHOLDS['AUTO_CONTAIN'][0] <= severity <= SEVERITY_THRESHOLDS['AUTO_CONTAIN'][1]:
+        if SEVERITY_THRESHOLDS['AUTO_CONTAIN'][0] <= severity <= SEVERITY_THRESHOLDS['AUTO_CONTAIN'][1]:
             self.stats['auto_contained'] += 1
             return {
                 'action': 'CONTAIN',

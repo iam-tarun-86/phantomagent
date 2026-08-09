@@ -139,6 +139,12 @@ class Database:
             )
             conn.commit()
 
+    def clear_all_logs(self):
+        """Delete all logs from the database"""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM logs")
+            conn.commit()
+
 
 # Singleton instance
 db = Database()

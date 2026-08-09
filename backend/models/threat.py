@@ -41,6 +41,8 @@ class Threat:
     status: ThreatStatus = ThreatStatus.DETECTED
     attack_pattern: Optional[str] = None
     explanation: Optional[str] = None
+    reason: Optional[str] = None
+    confidence: Optional[float] = None
     action_taken: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     
@@ -54,6 +56,8 @@ class Threat:
             "status": self.status.value,
             "attack_pattern": self.attack_pattern,
             "explanation": self.explanation,
+            "reason": self.reason,
+            "confidence": self.confidence,
             "action_taken": self.action_taken,
             "metadata": self.metadata,
         }

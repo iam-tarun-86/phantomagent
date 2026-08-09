@@ -72,7 +72,7 @@ graph TD
 | :--- | :--- | :--- |
 | **Stage 0** | **Detection Watchers** | System-level loops monitoring auth logs, folder changes, and live network sockets. |
 | **Stage 1** | **Pre-Filter Engine** | Deterministic rule matching to filter out background operating system noise. |
-| **Stage 2** | **Gemma AI Classifier** | Interrogates local **llama.cpp** using the `gemma-4-e4b` model to parse logs, map to attack patterns, and score confidence. |
+| **Stage 2** | **Gemma AI Classifier** | Interrogates local **llama.cpp** running `gemma` locally on port 8085 to parse logs, map to attack patterns, and score confidence. |
 | **Stage 3** | **Decision Engine** | Routes action pathways based on severity metrics: Log, Alert, Contain, or Lockdown. |
 | **Stage 4** | **Containment Responder** | Invokes mitigation scripts (IP blocking, process termination, folder locking) and compiles forensic case files. |
 

@@ -114,14 +114,14 @@ const AuthorityBar = () => {
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-panel-base/50 border border-panel-border/50">
                     <Activity size={14} className="text-contain-green" />
                     <div className="flex flex-col">
-                        <span className="text-[10px] text-data-white/40 font-mono uppercase tracking-wider">Qwen 3.5</span>
+                        <span className="text-[10px] text-data-white/40 font-mono uppercase tracking-wider">Gemma</span>
                         <div className="flex items-center gap-1.5">
                             <motion.div
                                 animate={{ scale: [1, 1.3, 1] }}
                                 transition={{ duration: 1.5, repeat: Infinity }}
                                 className="w-1.5 h-1.5 rounded-full bg-contain-green"
                             />
-                            <span className="text-sm font-mono font-bold text-contain-green">{telemetry.qwen_status}</span>
+                            <span className="text-sm font-mono font-bold text-contain-green">{telemetry.gemma_status}</span>
                         </div>
                     </div>
                 </div>

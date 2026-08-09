@@ -4,12 +4,72 @@ import { ShieldAlert, ShieldCheck, X, Clock, Globe, AlertTriangle, FileText } fr
 import ParticleBurst from './ParticleBurst'
 
 const RedAlertModal = ({ isOpen, threat, onApprove, onDismiss }) => {
-    const [countdown, setCountdown] = useState(30)
+    const [countdown, setCountdown] = useState(15)
     const [phase, setPhase] = useState('alert') // 'alert' | 'containing' | 'contained'
     const [particleTrigger, setParticleTrigger] = useState(false)
     const [particleOrigin, setParticleOrigin] = useState({ x: 0, y: 0 })
     const autoEscalated = useRef(false)
     const timerRef = useRef(null)
+    const audioCtxRef = useRef(null)
+    const oscillatorRef = useRef(null)
+
+    // Siren Audio Logic
+    useEffect(() => {
+        if (isOpen && phase === 'alert') {
+            try {
+                if (!audioCtxRef.current) {
+                    audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)()
+                }
+                const ctx = audioCtxRef.current
+                
+                const osc = ctx.createOscillator()
+                const gain = ctx.createGain()
+                
+                osc.type = 'square'
+                osc.connect(gain)
+                gain.connect(ctx.destination)
+                
+                // Siren modulation
+                let frequency = 400
+                let goingUp = true
+                
+                const modInterval = setInterval(() => {
+                    if (goingUp) {
+                        frequency += 50
+                        if (frequency >= 800) goingUp = false
+                    } else {
+                        frequency -= 50
+                        if (frequency <= 400) goingUp = true
+                    }
+                    if (oscillatorRef.current) {
+                        osc.frequency.setValueAtTime(frequency, ctx.currentTime)
+                    }
+                }, 50)
+                
+                gain.gain.setValueAtTime(0.1, ctx.currentTime) // Keep volume low
+                osc.start()
+                oscillatorRef.current = { osc, modInterval }
+                
+            } catch (e) {
+                console.error("Audio API not supported or blocked", e)
+            }
+        } else {
+            // Stop alarm if closed or phase changed
+            if (oscillatorRef.current) {
+                clearInterval(oscillatorRef.current.modInterval)
+                try { oscillatorRef.current.osc.stop() } catch(e){}
+                oscillatorRef.current = null
+            }
+        }
+        
+        return () => {
+            if (oscillatorRef.current) {
+                clearInterval(oscillatorRef.current.modInterval)
+                try { oscillatorRef.current.osc.stop() } catch(e){}
+                oscillatorRef.current = null
+            }
+        }
+    }, [isOpen, phase])
 
     // HARD RESET when modal opens with new threat
     useEffect(() => {
@@ -20,7 +80,7 @@ const RedAlertModal = ({ isOpen, threat, onApprove, onDismiss }) => {
         }
 
         // FORCE RESET everything
-        setCountdown(30)
+        setCountdown(15)
         setPhase('alert')
         setParticleTrigger(false)
         autoEscalated.current = false
@@ -45,7 +105,7 @@ const RedAlertModal = ({ isOpen, threat, onApprove, onDismiss }) => {
     useEffect(() => {
         if (!isOpen) {
             setPhase('alert')
-            setCountdown(30)
+            setCountdown(15)
             setParticleTrigger(false)
             autoEscalated.current = false
             if (timerRef.current) clearInterval(timerRef.current)
@@ -110,7 +170,7 @@ ATTACK TIMELINE
 ---------------
 ${new Date().toLocaleTimeString()} - Watcher detected anomalous connection
 ${new Date().toLocaleTimeString()} - Pre-filter flagged pattern match
-${new Date().toLocaleTimeString()} - Qwen 3.5 classified as ${threat?.type || 'Unknown'}
+${new Date().toLocaleTimeString()} - Gemma classified as ${threat?.type || 'Unknown'}
 ${new Date().toLocaleTimeString()} - Human approval received
 ${new Date().toLocaleTimeString()} - Containment executed
 

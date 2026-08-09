@@ -15,7 +15,7 @@ from backend.watchers.log_watcher import LogWatcher
 from backend.watchers.network_watcher import NetworkWatcher
 from backend.watchers.file_watcher import FileWatcher
 from backend.pipeline.prefilter import PreFilter
-from backend.pipeline.qwen_engine import QwenEngine
+from backend.pipeline.gemma_engine import GemmaEngine
 from backend.pipeline.decision_engine import DecisionEngine
 from backend.pipeline.responder import Responder
 
@@ -30,7 +30,7 @@ class DashboardState:
             "cpu": 12,
             "ram": 4.2,
             "vram": 5.8,
-            "qwen_status": "WARM",
+            "gemma_status": "WARM",
             "threats_blocked": 0,
             "uptime": "0d 0h 0m"
         }
@@ -39,7 +39,7 @@ class DashboardState:
         self.processing_actions: Set[str] = set()
         
         self.prefilter = PreFilter()
-        self.qwen = QwenEngine()
+        self.gemma = GemmaEngine()
         self.decision = DecisionEngine()
         self.responder = Responder()
         
@@ -87,13 +87,12 @@ class DashboardState:
         await self.add_log("PREFILTER", "WARN", f"Flagged: {filtered.get('type', 'Unknown')}")
         
         await self.broadcast_pipeline(2, filtered)
-        analysis = await self.qwen.analyze(filtered)
-        
-        await self.add_log("QWEN", "INFO", f"Analysis: {analysis.get('threat_type', 'Unknown')} (Sev: {analysis.get('severity', 0)})")
+        analysis = await self.gemma.analyze(filtered)
         
         await self.broadcast_pipeline(3, filtered)
         decision = self.decision.decide(analysis)
-                # Preserve test event severity if higher than AI's analysis
+        
+        # Preserve test event severity if higher than AI's analysis
         if event.get('severity', 0) > analysis.get('severity', 0):
             analysis['severity'] = event['severity']
             # Also preserve XAI fields from test event
@@ -106,6 +105,8 @@ class DashboardState:
             
             # Re-run decision with corrected severity
             decision = self.decision.decide(analysis)
+            
+        await self.add_log("GEMMA", "INFO", f"Analysis: {analysis.get('threat_type', 'Unknown')} (Sev: {analysis.get('severity', 0)}) - {analysis.get('reason', '')}")
         
         await self.add_log("DECISION", "INFO", f"Action: {decision['action']}")
         
@@ -121,12 +122,14 @@ class DashboardState:
             source_ip=filtered.get('source_ip', 'unknown'),
             raw_log=filtered.get('raw_log', ''),
             attack_pattern=analysis.get('attack_pattern'),
-            explanation=analysis.get('explanation')
+            explanation=analysis.get('explanation'),
+            reason=analysis.get('reason'),
+            confidence=analysis.get('confidence')
         )
         
-        threat_reason = event.get('reason', 'AI analysis in progress...')
-        threat_confidence = event.get('confidence', 0)
-        threat_indicators = event.get('indicators', [])
+        threat_reason = analysis.get('reason', 'AI analysis in progress...')
+        threat_confidence = analysis.get('confidence', 0)
+        threat_indicators = analysis.get('indicators', [])
         
         if decision['requires_approval']:
             threat.status = ThreatStatus.PENDING
@@ -154,6 +157,9 @@ class DashboardState:
             })
             
             await self.add_log("DECISION", "CRITICAL", f"Severity {threat.severity} → PENDING_APPROVAL")
+            
+            # Start the 15-second auto-containment timeout
+            asyncio.create_task(self.handle_approval_timeout(threat.id))
         
         elif decision['auto_execute']:
             threat.status = ThreatStatus.AUTO_CONTAINED
@@ -184,6 +190,36 @@ class DashboardState:
         self.pipeline_state = {"stage": stage, "threat_id": data.get('id', 'unknown')}
         await self.broadcast({"type": "pipeline", "data": self.pipeline_state})
 
+    async def handle_approval_timeout(self, threat_id: str):
+        """Wait 15 seconds, and if human hasn't responded, auto-contain it."""
+        await asyncio.sleep(15)
+        
+        if threat_id in self.pending_approvals:
+            print(f"[TIMEOUT] Threat {threat_id} auto-approved after 15s timeout")
+            
+            # Prevent double-processing
+            if threat_id in self.processing_actions:
+                return
+            self.processing_actions.add(threat_id)
+            
+            try:
+                pending = self.pending_approvals.pop(threat_id)
+                result = await self.responder.execute('LOCKDOWN', pending['threat'])
+                
+                await self.add_log("RESPONSE", "INFO", f"AUTO-TIMEOUT → {', '.join(result['actions_taken'])}")
+                self.telemetry['threats_blocked'] += 1
+                
+                await self.broadcast({
+                    "type": "contained",
+                    "data": {
+                        "threat_id": threat_id,
+                        "actions": result['actions_taken'],
+                        "report": result.get('forensic_report')
+                    }
+                })
+            finally:
+                self.processing_actions.discard(threat_id)
+
 
 state = DashboardState()
 
@@ -191,7 +227,7 @@ state = DashboardState()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("[MAIN] Starting PhantomAgent backend...")
-    await state.qwen.initialize()
+    await state.gemma.initialize()
     
     state.log_watcher = LogWatcher(WATCHED_LOGS, state.process_event)
     await state.log_watcher.start()
@@ -320,6 +356,14 @@ async def get_logs(limit: int = 50):
 @app.get("/api/logs/all")
 async def get_all_logs():
     return db.load_logs(limit=1000)
+
+@app.delete("/api/logs/all")
+async def delete_all_logs():
+    db.clear_all_logs()
+    state.logs = []
+    state.threats = []
+    await state.broadcast({"type": "clear_logs"})
+    return {"status": "cleared"}
 
 
 @app.post("/api/threats/{threat_id}/approve")

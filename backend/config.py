@@ -28,17 +28,15 @@ WATCHED_PATHS = [
     "/var/tmp",
 ]
 
-# Qwen Config
-QWEN_MODEL = "qwen3:8b"
-QWEN_API_URL = "http://localhost:8085/api/generate"
-QWEN_TIMEOUT = 30
+# Gemma Config
+GEMMA_MODEL = "gemma"
+GEMMA_API_URL = "http://localhost:8085/v1/chat/completions"
+GEMMA_TIMEOUT = 30
 
 # Decision Engine
 SEVERITY_THRESHOLDS = {
-    "LOG": (1, 3),
-    "ALERT": (4, 6),
-    "AUTO_CONTAIN": (7, 8),
-    "PENDING_APPROVAL": (9, 10),
+    "AUTO_CONTAIN": (1, 7),
+    "PENDING_APPROVAL": (8, 10),
 }
 
 # Responder

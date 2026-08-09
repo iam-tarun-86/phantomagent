@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Terminal, Clock, AlertTriangle, Info, AlertCircle, Minimize2 } from 'lucide-react'
-
+import { X, Terminal, Clock, AlertTriangle, Info, AlertCircle, Minimize2, Trash2 } from 'lucide-react'
+import { useDashboard } from '../context/DashboardContext.jsx'
 const LOG_COLORS = {
     INFO: 'text-neon-cyan',
     WARN: 'text-warning-amber',
@@ -21,6 +21,17 @@ const LOG_ICONS = {
 const FullscreenLogViewer = ({ isOpen, onClose }) => {
     const [logs, setLogs] = useState([])
     const [loading, setLoading] = useState(false)
+    const { clearLogs } = useDashboard()
+
+    const handleDeleteLogs = async () => {
+        try {
+            await fetch('/api/logs/all', { method: 'DELETE' })
+            setLogs([])
+            clearLogs()
+        } catch (err) {
+            console.error('[LOGS] Failed to delete logs:', err)
+        }
+    }
 
     // Fetch all historical logs from database when opened
     useEffect(() => {
@@ -70,13 +81,23 @@ const FullscreenLogViewer = ({ isOpen, onClose }) => {
                                 </span>
                             )}
                         </div>
-                        <button
-                            onClick={onClose}
-                            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-panel-border/50 hover:bg-panel-border text-data-white/60 hover:text-data-white font-mono text-sm transition-colors"
-                        >
-                            <Minimize2 size={16} />
-                            CLOSE
-                        </button>
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={handleDeleteLogs}
+                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-alert-red/10 hover:bg-alert-red/20 text-alert-red/80 hover:text-alert-red font-mono text-sm transition-colors border border-alert-red/20"
+                                title="Delete all logs from database"
+                            >
+                                <Trash2 size={16} />
+                                DELETE ALL
+                            </button>
+                            <button
+                                onClick={onClose}
+                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-panel-border/50 hover:bg-panel-border text-data-white/60 hover:text-data-white font-mono text-sm transition-colors"
+                            >
+                                <Minimize2 size={16} />
+                                CLOSE
+                            </button>
+                        </div>
                     </div>
 
                     {/* Log Table */}
