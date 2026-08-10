@@ -25,12 +25,16 @@ class NetworkWatcher:
         """Dynamically locate docker lab bridge interface or fall back to any active interface"""
         import psutil
         stats = psutil.net_if_stats()
+        # Prioritize active docker lab bridge interfaces (br-*)
         for iface in stats:
-            if (iface.startswith("br-") or iface.startswith("docker")) and stats[iface].isup:
+            if iface.startswith("br-") and stats[iface].isup:
+                return iface
+        for iface in stats:
+            if iface.startswith("docker") and stats[iface].isup:
                 return iface
         return "any"
 
-    def _can_alert(self, alert_key: str, cooldown_seconds: int = 30) -> bool:
+    def _can_alert(self, alert_key: str, cooldown_seconds: int = 15) -> bool:
         """Check if enough time has passed since the last alert for this key"""
         now = datetime.now()
         if alert_key in self.last_alert_time:
@@ -89,16 +93,24 @@ class NetworkWatcher:
         if self.callback and self.loop:
             features = self.feature_extractor.get_features(src_ip)
             
-            if features['unique_dst_ports'] >= 10 and self._can_alert(f"port_scan_{src_ip}"):
+            # Check thresholds: PortScan (unique_ports >= 5), DoS (freq >= 20.0), Brute Force (failed_auth >= 3)
+            is_scan = features['unique_dst_ports'] >= 5 or features['syn_count'] >= 10
+            is_dos = features['connection_frequency'] >= 20.0
+            is_bruteforce = features['failed_auth_count'] >= 3
+            is_anomaly = features['packet_count'] >= 15
+
+            if (is_scan or is_dos or is_bruteforce or is_anomaly) and self._can_alert(f"threat_{src_ip}"):
+                threat_type = "PORT_SCAN" if is_scan else ("DOS_ATTACK" if is_dos else ("BRUTE_FORCE" if is_bruteforce else "UNKNOWN_ZERO_DAY"))
+                
                 alert_payload = {
                     "source": "NETWORK",
-                    "type": "PORT_SCAN",
-                    "severity": 7,
+                    "type": threat_type,
+                    "severity": 7 if threat_type == "PORT_SCAN" else (9 if threat_type == "DOS_ATTACK" else 8),
                     "source_ip": src_ip,
                     "features": features,
-                    "raw_log": f"Real packet capture port scan: {features['unique_dst_ports']} unique ports probed by {src_ip}",
+                    "raw_log": f"Real packet capture threat: {threat_type} detected from {src_ip} ({features['packet_count']} pkts, {features['unique_dst_ports']} ports)",
                     "timestamp": datetime.now().isoformat(),
-                    "message": f"Real Port scan detected from {src_ip}: {features['unique_dst_ports']} ports probed"
+                    "message": f"Real {threat_type} detected from {src_ip}: {features['packet_count']} pkts processed"
                 }
                 asyncio.run_coroutine_threadsafe(self.callback(alert_payload), self.loop)
 
