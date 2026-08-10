@@ -87,27 +87,27 @@ class DashboardState:
         await self.add_log("PREFILTER", "WARN", f"Flagged: {filtered.get('type', 'Unknown')}")
         
         await self.broadcast_pipeline(2, filtered)
-        analysis = await self.gemma.analyze(filtered)
+        
+        # PHASE 5 PIPELINE WIRING: GNN 'Eyes' + Gemma 'Brain'
+        pipeline_res = await self.decision.analyze_and_route(filtered)
+        analysis = pipeline_res['analysis']
+        decision = pipeline_res['decision']
+        gnn_score = pipeline_res['gnn_score']
         
         await self.broadcast_pipeline(3, filtered)
-        decision = self.decision.decide(analysis)
         
         # Preserve test event severity if higher than AI's analysis
         if event.get('severity', 0) > analysis.get('severity', 0):
             analysis['severity'] = event['severity']
-            # Also preserve XAI fields from test event
             if event.get('reason'):
                 analysis['reason'] = event['reason']
             if event.get('confidence'):
                 analysis['confidence'] = event['confidence']
             if event.get('indicators'):
                 analysis['indicators'] = event['indicators']
-            
-            # Re-run decision with corrected severity
             decision = self.decision.decide(analysis)
             
-        await self.add_log("GEMMA", "INFO", f"Analysis: {analysis.get('threat_type', 'Unknown')} (Sev: {analysis.get('severity', 0)}) - {analysis.get('reason', '')}")
-        
+        await self.add_log("GNN+GEMMA", "INFO", f"Analysis: {analysis.get('threat_type', 'Unknown')} (GNN: {gnn_score:.4f}, Sev: {analysis.get('severity', 0)}) - {analysis.get('reason', '')}")
         await self.add_log("DECISION", "INFO", f"Action: {decision['action']}")
         
         threat_type_str = analysis.get('threat_type', 'Unknown')

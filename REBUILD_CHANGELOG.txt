@@ -95,4 +95,23 @@ Verification Completed:
 - Benign Sample -> `BENIGN` (Severity 2, LOG, Mitigation: NONE)
 - PortScan Sample -> `PORT_SCAN` (Severity 7, CONTAIN, Mitigation: iptables DROP rule)
 - Zero-Day Sample -> `UNKNOWN_ZERO_DAY` (Severity 8, CONTAIN, GNN score 0.8920)
+
+
+-------------------------------------------------------------------------------
+PHASE 5 — Full Pipeline Wiring (Real-Packet End-to-End System)
+-------------------------------------------------------------------------------
+Problem Solved:
+- Wired all individual modules together into a complete live threat detection, reasoning, and auto-containment loop connected to the React Dashboard.
+
+What We Added:
+1. `backend/pipeline/decision_engine.py`:
+   - Added `analyze_and_route(event_data)` executing Watcher -> Feature Extractor -> GNN -> Gemma -> Decision Routing.
+2. `backend/main.py`:
+   - Updated `process_event` handler to execute GNN+Gemma analysis and broadcast real-time WebSocket telemetry, alerts, and kill-chain stages to the React UI.
+3. `backend/test_phase5_live.py`:
+   - End-to-end live testing script for real attack traffic inside `phantom-lab`.
+
+Verification Completed:
+- Executed real Nmap scan from Kali container (`docker exec kali_attacker nmap -sS -p 1-50 172.28.0.5`).
+- Scapy sniffer captured raw packets on bridge interface (`br-*`) -> Feature Extractor computed metrics -> GNN computed anomaly score -> Gemma rendered `PORT_SCAN` verdict (Severity 7, Action: CONTAIN) -> Responder issued containment rules.
 ===============================================================================

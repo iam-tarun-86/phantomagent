@@ -1,13 +1,17 @@
-"""Decision engine: routes threats by severity"""
+"""Decision engine: routes threats by severity and integrates GNN + Gemma reasoning"""
 
 from typing import Dict, Any
 from backend.config import SEVERITY_THRESHOLDS
+from backend.pipeline.gnn_model import GNNPredictor
+from backend.pipeline.gemma_engine import GemmaEngine
 
 
 class DecisionEngine:
-    """Routes threats to appropriate action based on severity"""
+    """Routes threats and integrates GNN ('Eyes') + Gemma ('Brain') reasoning"""
     
     def __init__(self):
+        self.gnn = GNNPredictor()
+        self.gemma = GemmaEngine()
         self.stats = {
             'logged': 0,
             'alerted': 0,
@@ -16,10 +20,34 @@ class DecisionEngine:
             'approved': 0,
             'rejected': 0
         }
+
+    async def analyze_and_route(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Full Phase 5 Pipeline Processing:
+        Raw event features -> GNN Anomaly Score -> Gemma Verdict -> Decision Routing
+        """
+        features = event_data.get('features', {})
+        
+        # 1. GNN 'Eyes': Predict structural anomaly score [0.0 - 1.0]
+        gnn_score = self.gnn.predict_anomaly_score(features)
+        event_data['gnn_score'] = gnn_score
+
+        # 2. Gemma 'Brain': Generate structured JSON analysis
+        analysis = await self.gemma.analyze(event_data)
+        analysis['gnn_score'] = gnn_score
+
+        # 3. Route decision by severity
+        decision = self.decide(analysis)
+        
+        return {
+            'analysis': analysis,
+            'decision': decision,
+            'gnn_score': gnn_score
+        }
     
     def decide(self, analysis: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Make decision based on Qwen analysis.
+        Make decision based on Gemma analysis & GNN score.
         Returns: {action, requires_approval, auto_execute, reason}
         """
         severity = analysis.get('severity', 5)
