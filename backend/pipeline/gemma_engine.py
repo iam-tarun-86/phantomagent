@@ -1,4 +1,4 @@
-"""Gemma local LLM integration targeting gemma4:e4b via Ollama API"""
+"""Gemma local LLM integration supporting OpenAI-compatible endpoints (e.g., llama.cpp/vLLM on port 8085) and Ollama endpoints"""
 
 import json
 import aiohttp
@@ -7,7 +7,7 @@ from backend.config import GEMMA_API_URL, GEMMA_MODEL, GEMMA_TIMEOUT
 
 
 class GemmaEngine:
-    """Gemma 4 E4B LLM threat reasoning engine powered by Ollama API"""
+    """Gemma 4 E4B LLM threat reasoning engine supporting OpenAI /v1/chat/completions and Ollama APIs"""
     
     SYSTEM_PROMPT = """You are PhantomAgent's Cyber Threat Analysis Engine ("The Brain").
 Analyze the network traffic statistical features and GNN structural anomaly score to render a definitive cybersecurity verdict.
@@ -33,82 +33,108 @@ Rules:
 - If GNN anomaly score > 0.75 but features don't match known patterns, classify as UNKNOWN_ZERO_DAY with severity >= 8.
 - Respond ONLY with JSON. No markdown wrappers, no conversational filler."""
 
-    def __init__(self, ollama_url: str = "http://localhost:11434", model_name: str = "gemma4:e4b"):
-        self.ollama_url = ollama_url.rstrip("/")
-        self.model_name = model_name
+    def __init__(self, api_url: str = None, model_name: str = None):
+        self.api_url = api_url or GEMMA_API_URL
+        self.model_name = model_name or GEMMA_MODEL
         self.is_available = False
+        self.endpoint_type = "openai" if "chat/completions" in self.api_url else "ollama"
 
     async def initialize(self):
-        """Check if Ollama server and gemma4:e4b model are available"""
+        """Check if LLM API server is available"""
         try:
             async with aiohttp.ClientSession() as session:
-                url = f"{self.ollama_url}/api/tags"
-                async with session.get(url, timeout=5) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        models = [m.get('name') for m in data.get('models', [])]
+                if self.endpoint_type == "openai":
+                    # Check health or model endpoint for OpenAI compatible server (llama.cpp/vLLM)
+                    health_url = self.api_url.replace("/v1/chat/completions", "/health")
+                    try:
+                        async with session.get(health_url, timeout=3) as resp:
+                            if resp.status == 200:
+                                self.is_available = True
+                                print(f"[GEMMA-LLM] Connected to OpenAI-compatible server at {self.api_url}")
+                                return
+                    except Exception:
+                        pass
+                    
+                    # Fallback check on main endpoint
+                    async with session.options(self.api_url, timeout=3) as resp:
                         self.is_available = True
-                        print(f"[GEMMA-OLLAMA] Connected to Ollama server. Installed models: {models}")
-                    else:
-                        print(f"[GEMMA-OLLAMA] Ollama server returned HTTP {resp.status}. Using fallback.")
+                        print(f"[GEMMA-LLM] Connected to LLM server at {self.api_url}")
+                else:
+                    url = f"{self.api_url.rstrip('/')}/api/tags"
+                    async with session.get(url, timeout=3) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            models = [m.get('name') for m in data.get('models', [])]
+                            self.is_available = True
+                            print(f"[GEMMA-LLM] Connected to Ollama server at {self.api_url}. Models: {models}")
         except Exception as e:
-            print(f"[GEMMA-OLLAMA] Could not connect to Ollama ({e}). Using rule-based LLM fallback.")
+            print(f"[GEMMA-LLM] Could not connect to LLM server at {self.api_url} ({e}). Using rule-based fallback.")
 
     async def analyze(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Analyze network event containing feature stats and GNN anomaly score
-        """
+        """Analyze network event containing feature stats and GNN anomaly score"""
         if not self.is_available:
             return self._fallback_analysis(event)
 
         try:
             prompt = self._build_prompt(event)
-            url = f"{self.ollama_url}/api/generate"
             
-            payload = {
-                "model": self.model_name,
-                "prompt": f"{self.SYSTEM_PROMPT}\n\n{prompt}",
-                "format": "json",
-                "stream": False,
-                "options": {
-                    "temperature": 0.1
-                }
-            }
-
             async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=GEMMA_TIMEOUT)
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        response_text = data.get('response', '{}')
-                        
-                        try:
-                            analysis = json.loads(response_text)
-                            return {
-                                "threat_type": analysis.get('threat_type', 'UNKNOWN'),
-                                "confidence": float(analysis.get('confidence', 0.85)),
-                                "severity": int(analysis.get('severity', 5)),
-                                "attack_pattern": analysis.get('attack_pattern', 'Detected network anomaly'),
-                                "action": analysis.get('action', 'ALERT'),
-                                "explanation": analysis.get('explanation', 'Network anomaly detected'),
-                                "reason": analysis.get('reason', f"GNN Anomaly score {event.get('gnn_score', 0.0)} flagged suspicious features."),
-                                "indicators": analysis.get('indicators', [f"Source IP {event.get('source_ip', 'unknown')}"]),
-                                "mitigation": analysis.get('mitigation', f"iptables -A INPUT -s {event.get('source_ip', 'unknown')} -j DROP"),
-                                "source": "GEMMA_4_E4B",
-                                "ai_confidence": "HIGH"
-                            }
-                        except json.JSONDecodeError:
-                            print(f"[GEMMA-OLLAMA] JSON decoding error from output: {response_text}")
-                            return self._fallback_analysis(event)
-                    else:
-                        print(f"[GEMMA-OLLAMA] Ollama API error: {resp.status}")
-                        return self._fallback_analysis(event)
+                if self.endpoint_type == "openai":
+                    payload = {
+                        "model": self.model_name,
+                        "messages": [
+                            {"role": "system", "content": self.SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.1,
+                        "response_format": {"type": "json_object"}
+                    }
+                    async with session.post(self.api_url, json=payload, timeout=aiohttp.ClientTimeout(total=GEMMA_TIMEOUT)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            choices = data.get('choices', [])
+                            response_text = choices[0].get('message', {}).get('content', '{}') if choices else '{}'
+                            return self._parse_json_verdict(response_text, event)
+                else:
+                    url = f"{self.api_url.rstrip('/')}/api/generate"
+                    payload = {
+                        "model": self.model_name,
+                        "prompt": f"{self.SYSTEM_PROMPT}\n\n{prompt}",
+                        "format": "json",
+                        "stream": False,
+                        "options": {"temperature": 0.1}
+                    }
+                    async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=GEMMA_TIMEOUT)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            response_text = data.get('response', '{}')
+                            return self._parse_json_verdict(response_text, event)
+
+            return self._fallback_analysis(event)
 
         except Exception as e:
-            print(f"[GEMMA-OLLAMA] Inference exception: {e}")
+            print(f"[GEMMA-LLM] Inference exception: {e}")
+            return self._fallback_analysis(event)
+
+    def _parse_json_verdict(self, response_text: str, event: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse structured JSON verdict from LLM text response"""
+        try:
+            analysis = json.loads(response_text)
+            return {
+                "threat_type": analysis.get('threat_type', 'UNKNOWN'),
+                "confidence": float(analysis.get('confidence', 0.85)),
+                "severity": int(analysis.get('severity', 5)),
+                "attack_pattern": analysis.get('attack_pattern', 'Detected network anomaly'),
+                "action": analysis.get('action', 'ALERT'),
+                "explanation": analysis.get('explanation', 'Network anomaly detected'),
+                "reason": analysis.get('reason', f"GNN Anomaly score {event.get('gnn_score', 0.0)} flagged suspicious features."),
+                "indicators": analysis.get('indicators', [f"Source IP {event.get('source_ip', 'unknown')}"]),
+                "mitigation": analysis.get('mitigation', f"iptables -A INPUT -s {event.get('source_ip', 'unknown')} -j DROP"),
+                "source": "GEMMA_LLM",
+                "ai_confidence": "HIGH"
+            }
+        except json.JSONDecodeError:
+            print(f"[GEMMA-LLM] JSON decoding error: {response_text}")
             return self._fallback_analysis(event)
 
     def _build_prompt(self, event: Dict[str, Any]) -> str:
@@ -134,7 +160,7 @@ Extracted Live Features:
 Render final verdict in JSON format."""
 
     def _fallback_analysis(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """Rule-based fallback when Ollama API is unavailable"""
+        """Rule-based fallback when LLM API is unavailable"""
         features = event.get('features', {})
         gnn_score = event.get('gnn_score', event.get('prefilter_severity', 5) / 10.0)
         src_ip = event.get('source_ip', 'Unknown')
@@ -144,21 +170,21 @@ Render final verdict in JSON format."""
         failed_auth = features.get('failed_auth_count', 0)
         conn_freq = features.get('connection_frequency', 0.0)
 
-        if dst_ports >= 10 or syn_count >= 15:
+        if dst_ports >= 5 or syn_count >= 15:
             threat_type = "PORT_SCAN"
             severity = 7
             action = "CONTAIN"
             explanation = f"Sequential port probe detected from {src_ip} targeting {dst_ports} ports."
             reason = f"GNN score {gnn_score:.2f} + SYN count {syn_count} across {dst_ports} ports indicates Nmap stealth scan."
             mitigation = f"iptables -A INPUT -s {src_ip} -p tcp --dport 1:65535 -j DROP"
-        elif conn_freq > 50.0:
+        elif conn_freq >= 30.0:
             threat_type = "DOS_ATTACK"
             severity = 9
             action = "LOCKDOWN"
             explanation = f"Connection flooding attack detected from {src_ip} at {conn_freq} pkts/sec."
             reason = f"High frequency connection flood ({conn_freq} pkts/s) with GNN anomaly score {gnn_score:.2f}."
             mitigation = f"iptables -A INPUT -s {src_ip} -m limit --limit 10/s -j ACCEPT"
-        elif failed_auth > 5:
+        elif failed_auth >= 3:
             threat_type = "BRUTE_FORCE"
             severity = 8
             action = "CONTAIN"
