@@ -114,4 +114,22 @@ What We Added:
 Verification Completed:
 - Executed real Nmap scan from Kali container (`docker exec kali_attacker nmap -sS -p 1-50 172.28.0.5`).
 - Scapy sniffer captured raw packets on bridge interface (`br-*`) -> Feature Extractor computed metrics -> GNN computed anomaly score -> Gemma rendered `PORT_SCAN` verdict (Severity 7, Action: CONTAIN) -> Responder issued containment rules.
+
+
+-------------------------------------------------------------------------------
+PHASE 6 — Logging Layer (SQLite & JSONL Retraining Dataset)
+-------------------------------------------------------------------------------
+Problem Solved:
+- Persisted every detection event, raw feature set, GNN anomaly score, Gemma verdict, and operator action to disk for forensic audit trails and future ML retraining.
+
+What We Added:
+1. `backend/utils/event_logger.py`:
+   - Dual-sink logger writing structured JSON to `data/events_dataset.jsonl` and relational records to SQLite table `events_log` in `data/phantomagent.db`.
+2. `backend/pipeline/decision_engine.py`:
+   - Integrated `EventLogger` into the `analyze_and_route()` pipeline execution.
+3. `backend/test_phase6.py`:
+   - Verification test script.
+
+Verification Completed:
+- Executed test pipeline event -> Verified JSONL output line formatting and SQLite database query output (`PORT_SCAN`, Sev: 7, Action: CONTAIN).
 ===============================================================================

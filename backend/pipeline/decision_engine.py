@@ -4,6 +4,7 @@ from typing import Dict, Any
 from backend.config import SEVERITY_THRESHOLDS
 from backend.pipeline.gnn_model import GNNPredictor
 from backend.pipeline.gemma_engine import GemmaEngine
+from backend.utils.event_logger import EventLogger
 
 
 class DecisionEngine:
@@ -12,6 +13,7 @@ class DecisionEngine:
     def __init__(self):
         self.gnn = GNNPredictor()
         self.gemma = GemmaEngine()
+        self.logger = EventLogger()
         self.stats = {
             'logged': 0,
             'alerted': 0,
@@ -23,10 +25,11 @@ class DecisionEngine:
 
     async def analyze_and_route(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Full Phase 5 Pipeline Processing:
-        Raw event features -> GNN Anomaly Score -> Gemma Verdict -> Decision Routing
+        Full Phase 5 & 6 Pipeline Processing:
+        Raw event features -> GNN Anomaly Score -> Gemma Verdict -> Decision Routing -> Event Logging
         """
         features = event_data.get('features', {})
+        src_ip = event_data.get('source_ip', 'unknown')
         
         # 1. GNN 'Eyes': Predict structural anomaly score [0.0 - 1.0]
         gnn_score = self.gnn.predict_anomaly_score(features)
@@ -38,6 +41,15 @@ class DecisionEngine:
 
         # 3. Route decision by severity
         decision = self.decide(analysis)
+        
+        # 4. Phase 6 Event Logging: Persist event record to SQLite and JSONL
+        self.logger.log_event(
+            source_ip=src_ip,
+            features=features,
+            gnn_score=gnn_score,
+            verdict=analysis,
+            action_taken=decision['action']
+        )
         
         return {
             'analysis': analysis,
