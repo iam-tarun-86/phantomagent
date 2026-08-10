@@ -232,7 +232,8 @@ async def lifespan(app: FastAPI):
     state.log_watcher = LogWatcher(WATCHED_LOGS, state.process_event)
     await state.log_watcher.start()
     
-    state.network_watcher = NetworkWatcher(NETWORK_INTERFACE, state.process_event)
+    loop = asyncio.get_running_loop()
+    state.network_watcher = NetworkWatcher(NETWORK_INTERFACE, state.process_event, loop=loop)
     await state.network_watcher.start()
     
     state.file_watcher = FileWatcher(WATCHED_PATHS, state.process_event)
