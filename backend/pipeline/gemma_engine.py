@@ -1,4 +1,4 @@
-"""Gemma local LLM integration"""
+"""Gemma local LLM integration targeting gemma4:e4b via Ollama API"""
 
 import json
 import aiohttp
@@ -7,238 +7,189 @@ from backend.config import GEMMA_API_URL, GEMMA_MODEL, GEMMA_TIMEOUT
 
 
 class GemmaEngine:
-    """Local Gemma analysis engine"""
+    """Gemma 4 E4B LLM threat reasoning engine powered by Ollama API"""
     
-    SYSTEM_PROMPT = """You are an elite cybersecurity analyst. Analyze this security event and respond ONLY in valid JSON format with these exact fields:
+    SYSTEM_PROMPT = """You are PhantomAgent's Cyber Threat Analysis Engine ("The Brain").
+Analyze the network traffic statistical features and GNN structural anomaly score to render a definitive cybersecurity verdict.
+
+Respond ONLY in strict JSON format with these exact fields:
 {
-    "threat_type": "Brute Force|Port Scan|File Anomaly|DNS Tunneling|Suspicious Login|Malware|Unknown",
+    "threat_type": "PORT_SCAN|DOS_ATTACK|BRUTE_FORCE|SUSPICIOUS_LOGIN|FILE_ANOMALY|UNKNOWN_ZERO_DAY|BENIGN",
+    "confidence": 0.0-1.0,
     "severity": 1-10,
-    "attack_pattern": "brief description of attack technique",
+    "attack_pattern": "brief technical description of attack pattern",
     "action": "LOG|ALERT|CONTAIN|LOCKDOWN",
-    "explanation": "one sentence explaining why this is a threat",
-    "reason": "detailed explanation of why this was flagged, including specific indicators",
-    "confidence": 85,
-    "indicators": ["indicator 1", "indicator 2", "indicator 3"]
+    "explanation": "one clear sentence executive summary",
+    "reason": "detailed technical reasoning citing specific feature numbers and GNN anomaly score",
+    "indicators": ["indicator 1", "indicator 2"],
+    "mitigation": "suggested active mitigation command or firewall rule"
 }
 
 Rules:
-- severity 1-3: minor concern, LOG
-- severity 4-6: moderate threat, ALERT
-- severity 7-8: serious threat, CONTAIN
-- severity 9-10: critical threat, LOCKDOWN
-- reason: detailed technical explanation with specific numbers/patterns
-- confidence: 0-100 based on certainty
-- indicators: list of specific observable indicators
-- Be concise. Respond ONLY with JSON. No markdown, no explanations."""
-    
-    def __init__(self):
-        self.session = None
+- severity 1-3: minor concern, action LOG
+- severity 4-6: moderate threat, action ALERT
+- severity 7-8: serious threat (e.g. PORT_SCAN), action CONTAIN
+- severity 9-10: critical threat (e.g. DOS_ATTACK, BRUTE_FORCE), action LOCKDOWN
+- If GNN anomaly score > 0.75 but features don't match known patterns, classify as UNKNOWN_ZERO_DAY with severity >= 8.
+- Respond ONLY with JSON. No markdown wrappers, no conversational filler."""
+
+    def __init__(self, ollama_url: str = "http://localhost:11434", model_name: str = "gemma4:e4b"):
+        self.ollama_url = ollama_url.rstrip("/")
+        self.model_name = model_name
         self.is_available = False
-    
+
     async def initialize(self):
-        """Check if Gemma is available"""
+        """Check if Ollama server and gemma4:e4b model are available"""
         try:
             async with aiohttp.ClientSession() as session:
-                # llama.cpp default health check endpoint
-                health_url = GEMMA_API_URL.replace("/v1/chat/completions", "/health")
-                async with session.get(health_url, timeout=5) as resp:
+                url = f"{self.ollama_url}/api/tags"
+                async with session.get(url, timeout=5) as resp:
                     if resp.status == 200:
+                        data = await resp.json()
+                        models = [m.get('name') for m in data.get('models', [])]
                         self.is_available = True
-                        print(f"[GEMMA] Connected to llama.cpp.")
+                        print(f"[GEMMA-OLLAMA] Connected to Ollama server. Installed models: {models}")
                     else:
-                        print("[GEMMA] llama.cpp not responding. Using fallback analysis.")
+                        print(f"[GEMMA-OLLAMA] Ollama server returned HTTP {resp.status}. Using fallback.")
         except Exception as e:
-            print(f"[GEMMA] Cannot connect to llama.cpp: {e}")
-            print("[GEMMA] Using rule-based fallback analysis.")
-    
+            print(f"[GEMMA-OLLAMA] Could not connect to Ollama ({e}). Using rule-based LLM fallback.")
+
     async def analyze(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Analyze a security event with Gemma or fallback.
+        Analyze network event containing feature stats and GNN anomaly score
         """
         if not self.is_available:
             return self._fallback_analysis(event)
-        
+
         try:
             prompt = self._build_prompt(event)
+            url = f"{self.ollama_url}/api/generate"
             
+            payload = {
+                "model": self.model_name,
+                "prompt": f"{self.SYSTEM_PROMPT}\n\n{prompt}",
+                "format": "json",
+                "stream": False,
+                "options": {
+                    "temperature": 0.1
+                }
+            }
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    GEMMA_API_URL,
-                    json={
-                        "messages": [
-                            {"role": "system", "content": self.SYSTEM_PROMPT},
-                            {"role": "user", "content": prompt}
-                        ],
-                        "temperature": 0.1,
-                        "response_format": {"type": "json_object"}
-                    },
+                    url,
+                    json=payload,
                     timeout=aiohttp.ClientTimeout(total=GEMMA_TIMEOUT)
                 ) as resp:
-                    
                     if resp.status == 200:
                         data = await resp.json()
-                        choices = data.get('choices', [])
-                        if choices:
-                            response_text = choices[0].get('message', {}).get('content', '{}')
-                        else:
-                            response_text = '{}'
+                        response_text = data.get('response', '{}')
                         
-                        # Parse JSON response
                         try:
                             analysis = json.loads(response_text)
                             return {
-                                "threat_type": analysis.get('threat_type', 'Unknown'),
+                                "threat_type": analysis.get('threat_type', 'UNKNOWN'),
+                                "confidence": float(analysis.get('confidence', 0.85)),
                                 "severity": int(analysis.get('severity', 5)),
-                                "attack_pattern": analysis.get('attack_pattern', 'Unknown pattern'),
+                                "attack_pattern": analysis.get('attack_pattern', 'Detected network anomaly'),
                                 "action": analysis.get('action', 'ALERT'),
-                                "explanation": analysis.get('explanation', 'No explanation provided'),
-                                # ===== NEW XAI FIELDS =====
-                                "reason": analysis.get('reason', 'AI analysis in progress...'),
-                                "confidence": float(analysis.get('confidence', 85.0)),
-                                "indicators": analysis.get('indicators', ['Pattern match detected']),
-                                # ==========================
-                                "source": "GEMMA",
+                                "explanation": analysis.get('explanation', 'Network anomaly detected'),
+                                "reason": analysis.get('reason', f"GNN Anomaly score {event.get('gnn_score', 0.0)} flagged suspicious features."),
+                                "indicators": analysis.get('indicators', [f"Source IP {event.get('source_ip', 'unknown')}"]),
+                                "mitigation": analysis.get('mitigation', f"iptables -A INPUT -s {event.get('source_ip', 'unknown')} -j DROP"),
+                                "source": "GEMMA_4_E4B",
                                 "ai_confidence": "HIGH"
                             }
                         except json.JSONDecodeError:
-                            print(f"[GEMMA] Invalid JSON response: {response_text}")
+                            print(f"[GEMMA-OLLAMA] JSON decoding error from output: {response_text}")
                             return self._fallback_analysis(event)
                     else:
-                        print(f"[GEMMA] API error: {resp.status}")
+                        print(f"[GEMMA-OLLAMA] Ollama API error: {resp.status}")
                         return self._fallback_analysis(event)
-                        
+
         except Exception as e:
-            print(f"[GEMMA] Analysis error: {e}")
+            print(f"[GEMMA-OLLAMA] Inference exception: {e}")
             return self._fallback_analysis(event)
-    
+
     def _build_prompt(self, event: Dict[str, Any]) -> str:
-        """Build analysis prompt from event"""
-        return f"""Analyze this security event:
+        """Construct structured prompt from features and GNN score"""
+        features = event.get('features', {})
+        gnn_score = event.get('gnn_score', 0.0)
+        src_ip = event.get('source_ip', 'Unknown')
 
-Source: {event.get('source', 'Unknown')}
-Type: {event.get('type', 'Unknown')}
-Raw Log: {event.get('raw_log', 'No log data')}
-Source IP: {event.get('source_ip', 'Unknown')}
-Pre-filter Severity: {event.get('prefilter_severity', 'Unknown')}
+        return f"""Analyze Network Event:
+Source IP: {src_ip}
+GNN Structural Anomaly Score: {gnn_score:.4f} (Scale 0.0=Benign to 1.0=Critical Anomaly)
 
-Respond with JSON only. Include detailed reason, confidence score (0-100), and specific indicators."""
-    
+Extracted Live Features:
+- Packets in Window: {features.get('packet_count', 0)}
+- SYN Packets: {features.get('syn_count', 0)}
+- ACK Packets: {features.get('ack_count', 0)}
+- RST Packets: {features.get('rst_count', 0)}
+- Unique Destination Ports Targeted: {features.get('unique_dst_ports', 0)}
+- Total Bytes Sent: {features.get('bytes_sent', 0)}
+- Connection Frequency: {features.get('connection_frequency', 0.0)} pkts/sec
+- Failed Authentication Attempts: {features.get('failed_auth_count', 0)}
+
+Render final verdict in JSON format."""
+
     def _fallback_analysis(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """Rule-based fallback when Gemma is unavailable"""
-        event_type = event.get('type', 'UNKNOWN')
-        prefilter_sev = event.get('prefilter_severity', 5)
-        source_ip = event.get('source_ip', 'Unknown')
-        raw_log = event.get('raw_log', 'No log data')
-        
-        fallbacks = {
-            'BRUTE_FORCE': {
-                'threat_type': 'Brute Force',
-                'severity': 9,
-                'attack_pattern': 'Repeated failed authentication attempts',
-                'action': 'LOCKDOWN',
-                'explanation': 'Multiple failed login attempts indicate brute force attack',
-                # ===== NEW XAI FIELDS =====
-                'reason': f'Multiple failed SSH login attempts detected from {source_ip}. Pattern matches Hydra/Medusa brute-force tool signature. High-frequency attempts with common credential lists.',
-                'confidence': 92.5,
-                'indicators': [
-                    f'Repeated failed auth from {source_ip}',
-                    'Common username: root/admin',
-                    'Password spraying pattern',
-                    'No successful authentication',
-                    'High frequency attempts'
-                ]
-                # ==========================
-            },
-            'PORT_SCAN': {
-                'threat_type': 'Port Scan',
-                'severity': 7,
-                'attack_pattern': 'Reconnaissance probing multiple ports',
-                'action': 'CONTAIN',
-                'explanation': 'Systematic port scanning indicates reconnaissance activity',
-                # ===== NEW XAI FIELDS =====
-                'reason': f'Sequential SYN packets detected across multiple ports from {source_ip}. No legitimate handshake completion. Pattern matches Nmap -sS stealth scan.',
-                'confidence': 88.3,
-                'indicators': [
-                    f'Multiple ports probed from {source_ip}',
-                    'SYN packets without ACK',
-                    'Sequential port targeting',
-                    'No established connections',
-                    'Reconnaissance behavior'
-                ]
-                # ==========================
-            },
-            'FILE_ANOMALY': {
-                'threat_type': 'File Anomaly',
-                'severity': 6,
-                'attack_pattern': 'Suspicious executable in temporary directory',
-                'action': 'ALERT',
-                'explanation': 'Executable file created in temporary location',
-                # ===== NEW XAI FIELDS =====
-                'reason': f'Suspicious file activity detected. {raw_log}. File location and behavior match known malware patterns.',
-                'confidence': 78.0,
-                'indicators': [
-                    'Executable in temp directory',
-                    'Unexpected file creation',
-                    'Suspicious file signature',
-                    'No legitimate process association'
-                ]
-                # ==========================
-            },
-            'DNS_TUNNELING': {
-                'threat_type': 'DNS Tunneling',
-                'severity': 8,
-                'attack_pattern': 'Data exfiltration via DNS queries',
-                'action': 'CONTAIN',
-                'explanation': 'Abnormal DNS query patterns suggest data tunneling',
-                # ===== NEW XAI FIELDS =====
-                'reason': f'Abnormal DNS query volume and patterns from {source_ip}. Queries to unusual domains with high entropy. Possible data exfiltration via DNS protocol.',
-                'confidence': 85.7,
-                'indicators': [
-                    'High DNS query volume',
-                    'Unusual domain names',
-                    'High entropy subdomains',
-                    'Large query payload sizes',
-                    'Off-hours activity'
-                ]
-                # ==========================
-            },
-            'SUSPICIOUS_LOGIN': {
-                'threat_type': 'Suspicious Login',
-                'severity': 5,
-                'attack_pattern': 'Unusual authentication attempt',
-                'action': 'ALERT',
-                'explanation': 'Login attempt from unexpected source or with unusual pattern',
-                # ===== NEW XAI FIELDS =====
-                'reason': f'Login attempt from {source_ip} with unusual characteristics. Geographic anomaly or timing pattern detected.',
-                'confidence': 72.0,
-                'indicators': [
-                    f'Login from {source_ip}',
-                    'Unusual time of access',
-                    'Geographic anomaly',
-                    'Failed MFA attempt'
-                ]
-                # ==========================
-            },
+        """Rule-based fallback when Ollama API is unavailable"""
+        features = event.get('features', {})
+        gnn_score = event.get('gnn_score', event.get('prefilter_severity', 5) / 10.0)
+        src_ip = event.get('source_ip', 'Unknown')
+
+        syn_count = features.get('syn_count', 0)
+        dst_ports = features.get('unique_dst_ports', 0)
+        failed_auth = features.get('failed_auth_count', 0)
+        conn_freq = features.get('connection_frequency', 0.0)
+
+        if dst_ports >= 10 or syn_count >= 15:
+            threat_type = "PORT_SCAN"
+            severity = 7
+            action = "CONTAIN"
+            explanation = f"Sequential port probe detected from {src_ip} targeting {dst_ports} ports."
+            reason = f"GNN score {gnn_score:.2f} + SYN count {syn_count} across {dst_ports} ports indicates Nmap stealth scan."
+            mitigation = f"iptables -A INPUT -s {src_ip} -p tcp --dport 1:65535 -j DROP"
+        elif conn_freq > 50.0:
+            threat_type = "DOS_ATTACK"
+            severity = 9
+            action = "LOCKDOWN"
+            explanation = f"Connection flooding attack detected from {src_ip} at {conn_freq} pkts/sec."
+            reason = f"High frequency connection flood ({conn_freq} pkts/s) with GNN anomaly score {gnn_score:.2f}."
+            mitigation = f"iptables -A INPUT -s {src_ip} -m limit --limit 10/s -j ACCEPT"
+        elif failed_auth > 5:
+            threat_type = "BRUTE_FORCE"
+            severity = 8
+            action = "CONTAIN"
+            explanation = f"Authentication brute-force detected from {src_ip} with {failed_auth} failed logins."
+            reason = f"Multiple failed login attempts ({failed_auth}) from {src_ip}. GNN anomaly score {gnn_score:.2f}."
+            mitigation = f"fail2ban-client set sshd banip {src_ip}"
+        elif gnn_score > 0.75:
+            threat_type = "UNKNOWN_ZERO_DAY"
+            severity = 8
+            action = "CONTAIN"
+            explanation = f"Zero-day structural anomaly detected from {src_ip} by GNN model."
+            reason = f"GNN structural anomaly score {gnn_score:.4f} exceeded threshold 0.75 without matching known attack signatures."
+            mitigation = f"iptables -A INPUT -s {src_ip} -j DROP"
+        else:
+            threat_type = "BENIGN"
+            severity = 2
+            action = "LOG"
+            explanation = f"Normal network traffic pattern from {src_ip}."
+            reason = f"Features and GNN anomaly score ({gnn_score:.2f}) are within benign operational bounds."
+            mitigation = "NONE"
+
+        return {
+            "threat_type": threat_type,
+            "confidence": 0.90 if gnn_score > 0.5 else 0.95,
+            "severity": severity,
+            "attack_pattern": f"{threat_type} pattern match",
+            "action": action,
+            "explanation": explanation,
+            "reason": reason,
+            "indicators": [f"Source IP: {src_ip}", f"GNN Score: {gnn_score:.4f}", f"Unique Ports: {dst_ports}"],
+            "mitigation": mitigation,
+            "source": "GEMMA_FALLBACK",
+            "ai_confidence": "HIGH"
         }
-        
-        result = fallbacks.get(event_type, {
-            'threat_type': 'Unknown',
-            'severity': prefilter_sev,
-            'attack_pattern': 'Unrecognized activity pattern',
-            'action': 'ALERT',
-            'explanation': 'Unable to classify threat pattern',
-            # ===== NEW XAI FIELDS =====
-            'reason': f'Unrecognized activity pattern from {source_ip}. {raw_log}. Requires manual review.',
-            'confidence': 45.0,
-            'indicators': [
-                f'Unknown pattern from {source_ip}',
-                'Unclassified activity',
-                'Manual review required'
-            ]
-            # ==========================
-        })
-        
-        result['source'] = 'FALLBACK'
-        result['ai_confidence'] = 'MEDIUM'
-        
-        return result
