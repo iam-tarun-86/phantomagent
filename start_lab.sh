@@ -34,7 +34,7 @@ fi
 
 # 4. Start Backend Server with Scapy Packet Sniffing Capability
 echo "[3/4] Starting PhantomAgent Backend Server (FastAPI + Scapy + GNN + Gemma)..."
-sudo PYTHONPATH=/home/tarun/.local/lib/python3.12/site-packages:/usr/local/lib/python3.12/dist-packages:. python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 &
+sudo PYTHONPATH=/usr/local/lib/python3.12/dist-packages:/home/tarun/.local/lib/python3.12/site-packages:. python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 echo "      Backend running under PID ${BACKEND_PID} at http://localhost:8000"
 
