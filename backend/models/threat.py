@@ -11,6 +11,8 @@ import uuid
 class ThreatType(Enum):
     BRUTE_FORCE = "Brute Force"
     PORT_SCAN = "Port Scan"
+    DOS_ATTACK = "DoS Attack"
+    UNKNOWN_ZERO_DAY = "Zero Day Attack"
     FILE_ANOMALY = "File Anomaly"
     DNS_TUNNELING = "DNS Tunneling"
     SUSPICIOUS_LOGIN = "Suspicious Login"

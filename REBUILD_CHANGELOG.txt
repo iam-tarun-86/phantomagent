@@ -76,7 +76,7 @@ Verification Completed:
 
 
 -------------------------------------------------------------------------------
-PHASE 4 — LLM "Brain" Integration (Gemma 4 E4B via Ollama)
+PHASE 4 — LLM "Brain" Integration (Gemma 4 E4B via Ollama & OpenAI compatibility)
 -------------------------------------------------------------------------------
 Problem Solved:
 - Needed a reasoning LLM engine ("The Brain") to consume live traffic feature statistics and GNN structural anomaly scores to produce structured threat verdicts and mitigation commands.
@@ -84,7 +84,7 @@ Problem Solved:
 What We Added:
 1. `backend/pipeline/gemma_engine.py`:
    - Refactored prompt template to accept feature stats and GNN anomaly scores.
-   - Integrated Ollama API targeting `gemma4:e4b` (`http://localhost:11434/api/generate`).
+   - Supports both OpenAI-compatible endpoints (`http://localhost:8085/v1/chat/completions`) and native Ollama API endpoints (`http://localhost:11434/api/generate`).
    - Enforced strict JSON verdict schema: `threat_type`, `confidence`, `severity`, `attack_pattern`, `action`, `explanation`, `reason`, `indicators`, `mitigation`.
    - Added robust rule-based fallback for offline resilience.
 2. `backend/test_phase4.py`:
@@ -135,20 +135,25 @@ Verification Completed:
 
 
 -------------------------------------------------------------------------------
-PHASE 7 — Demo Packaging & Live Execution Troubleshooting
+PHASE 7 — Demo Packaging & Comprehensive System Calibration
 -------------------------------------------------------------------------------
-Problem Solved:
+Problems Solved:
 - Issue 1: `uvicorn` and `fastapi` module missing error (`ModuleNotFoundError: No module named 'fastapi'`) when launching `start_lab.sh` under `sudo` environment.
 - Issue 2: Scapy AsyncSniffer background thread callback loop dispatch mismatch (`run_coroutine_threadsafe` target event loop missing in `main.py`).
 - Issue 3: Ambient non-attack background packets (WSL host / browser connections) triggering false-positive `UNKNOWN_ZERO_DAY` alerts without an attack.
-- Issue 4: LLM API endpoint URL pointing to port 8085 instead of Ollama base URL.
+- Issue 4: LLM API endpoint URL compatibility (`http://localhost:8085/v1/chat/completions`).
+- Issue 5: `ThreatType` Enum missing `DOS_ATTACK` and `UNKNOWN_ZERO_DAY` mappings causing fallback to `ThreatType.UNKNOWN`.
 
 Fixes Applied:
 1. Re-installed all backend dependencies (`fastapi`, `starlette`, `websockets`, `pydantic`, `scapy`, `aiohttp`, `psutil`, `uvicorn`) system-wide into root's global site packages.
 2. Updated `start_lab.sh` to explicitly add system dist-packages (`/usr/local/lib/python3.12/dist-packages`) to `PYTHONPATH`.
 3. Updated `backend/main.py` lifespan setup to explicitly pass `asyncio.get_running_loop()` into `NetworkWatcher` initialization, allowing live packet sniffer alerts to cleanly dispatch to WebSockets and render in real-time on the React UI.
-4. Configured `backend/config.py`: Set `GEMMA_API_URL = "http://localhost:8085"` and `GEMMA_MODEL = "gemma4:e4b"`.
-5. Calibrated `backend/watchers/network_watcher.py`:
+4. Upgraded `backend/models/threat.py`: Added `DOS_ATTACK = "DoS Attack"` and `UNKNOWN_ZERO_DAY = "Zero Day Attack"` to `ThreatType` enum.
+5. Configured `backend/config.py`: Set `GEMMA_API_URL = "http://localhost:8085/v1/chat/completions"` and `GEMMA_MODEL = "gemma4:e4b"`.
+6. Updated `backend/pipeline/gemma_engine.py`: Enhanced endpoint parsing for both OpenAI `/v1/chat/completions` JSON responses and Ollama `/api/generate` responses.
+7. Calibrated `backend/watchers/network_watcher.py`:
+   - Dynamically binds Scapy AsyncSniffer directly to the active Docker lab bridge interface (`br-*`).
+   - Whitelisted local host IPs (`127.0.0.1`, `::1`, `10.0.2.15`).
    - Restricted network triggers strictly to explicit attack signatures (`unique_dst_ports >= 8`, `syn_count >= 15`, `connection_frequency >= 30.0`, `failed_auth_count >= 3`).
    - Removed low packet-count fallback triggers to eliminate ambient background false positives.
 
@@ -159,5 +164,6 @@ What We Added:
 
 Verification Completed:
 - Successfully ran `./start_lab.sh` -> Backend API started on port 8000 and React Dashboard started on port 5173.
+- Tested `test_phase2.py` live sniffer on bridge interface -> Captured 30 Nmap packets, 30 unique ports in 0.14 seconds.
 - Executed `./scripts/demo_attacks.sh` Option 1 (Nmap Stealth Scan) -> Real-time alert dispatched over WebSockets, updating Dashboard UI with PORT_SCAN verdict, logs, and Red Alert modal.
 ===============================================================================
