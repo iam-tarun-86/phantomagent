@@ -18,7 +18,7 @@ WATCHED_LOGS = [
 ]
 
 # Network Config
-NETWORK_INTERFACE = "eth0"
+NETWORK_INTERFACE = None
 PORT_SCAN_THRESHOLD = 20
 DNS_TUNNEL_DOMAINS = [".tk", ".ml", ".ga", ".cf"]
 

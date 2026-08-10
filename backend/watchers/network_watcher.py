@@ -96,7 +96,7 @@ class NetworkWatcher:
             features = self.feature_extractor.get_features(src_ip)
             
             # Strict attack signatures only (no generic packet_count triggers)
-            is_scan = features['unique_dst_ports'] >= 8 or features['syn_count'] >= 15
+            is_scan = features['unique_dst_ports'] >= 3 or features['syn_count'] >= 5
             is_dos = features['connection_frequency'] >= 30.0
             is_bruteforce = features['failed_auth_count'] >= 3
 
