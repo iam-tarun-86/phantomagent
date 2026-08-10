@@ -28,9 +28,9 @@ WATCHED_PATHS = [
     "/var/tmp",
 ]
 
-# Gemma Config
-GEMMA_MODEL = "gemma"
-GEMMA_API_URL = "http://localhost:8085/v1/chat/completions"
+# Gemma / LLM Config
+GEMMA_MODEL = "gemma4:e4b"
+GEMMA_API_URL = "http://localhost:8085"
 GEMMA_TIMEOUT = 30
 
 # Decision Engine

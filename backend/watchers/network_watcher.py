@@ -19,7 +19,8 @@ class NetworkWatcher:
         self.sniffer: Optional[AsyncSniffer] = None
         self.running = False
         self.last_alert_time: Dict[str, datetime] = {}
-        self.whitelist = {"127.0.0.1", "::1", "localhost"}
+        # Whitelist localhost and local host IP ranges
+        self.whitelist = {"127.0.0.1", "::1", "localhost", "10.0.2.15"}
 
     def _find_docker_interface(self) -> str:
         """Dynamically locate docker lab bridge interface or fall back to any active interface"""
@@ -34,7 +35,7 @@ class NetworkWatcher:
                 return iface
         return "any"
 
-    def _can_alert(self, alert_key: str, cooldown_seconds: int = 15) -> bool:
+    def _can_alert(self, alert_key: str, cooldown_seconds: int = 20) -> bool:
         """Check if enough time has passed since the last alert for this key"""
         now = datetime.now()
         if alert_key in self.last_alert_time:
@@ -52,6 +53,7 @@ class NetworkWatcher:
         src_ip = ip_layer.src
         dst_ip = ip_layer.dst
 
+        # Ignore local host or internal gateway whitelist
         if src_ip in self.whitelist:
             return
 
@@ -93,14 +95,13 @@ class NetworkWatcher:
         if self.callback and self.loop:
             features = self.feature_extractor.get_features(src_ip)
             
-            # Check thresholds: PortScan (unique_ports >= 5), DoS (freq >= 20.0), Brute Force (failed_auth >= 3)
-            is_scan = features['unique_dst_ports'] >= 5 or features['syn_count'] >= 10
-            is_dos = features['connection_frequency'] >= 20.0
+            # Strict attack signatures only (no generic packet_count triggers)
+            is_scan = features['unique_dst_ports'] >= 8 or features['syn_count'] >= 15
+            is_dos = features['connection_frequency'] >= 30.0
             is_bruteforce = features['failed_auth_count'] >= 3
-            is_anomaly = features['packet_count'] >= 15
 
-            if (is_scan or is_dos or is_bruteforce or is_anomaly) and self._can_alert(f"threat_{src_ip}"):
-                threat_type = "PORT_SCAN" if is_scan else ("DOS_ATTACK" if is_dos else ("BRUTE_FORCE" if is_bruteforce else "UNKNOWN_ZERO_DAY"))
+            if (is_scan or is_dos or is_bruteforce) and self._can_alert(f"threat_{src_ip}"):
+                threat_type = "PORT_SCAN" if is_scan else ("DOS_ATTACK" if is_dos else "BRUTE_FORCE")
                 
                 alert_payload = {
                     "source": "NETWORK",
@@ -110,7 +111,7 @@ class NetworkWatcher:
                     "features": features,
                     "raw_log": f"Real packet capture threat: {threat_type} detected from {src_ip} ({features['packet_count']} pkts, {features['unique_dst_ports']} ports)",
                     "timestamp": datetime.now().isoformat(),
-                    "message": f"Real {threat_type} detected from {src_ip}: {features['packet_count']} pkts processed"
+                    "message": f"Real {threat_type} detected from {src_ip}: {features['unique_dst_ports']} unique ports probed"
                 }
                 asyncio.run_coroutine_threadsafe(self.callback(alert_payload), self.loop)
 
