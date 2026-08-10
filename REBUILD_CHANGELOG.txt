@@ -43,4 +43,34 @@ What We Added:
 
 Verification Completed:
 - Ran live Nmap scan from `kali_attacker` container -> Scapy captured real packets -> `FeatureExtractor` computed exact metrics (`unique_dst_ports: 10`, `syn_count: 10`, `bytes_sent: 580`).
+
+
+-------------------------------------------------------------------------------
+PHASE 3 — GNN "Eyes" (Offline Standalone ML Model)
+-------------------------------------------------------------------------------
+Problem Solved:
+- Needed a structural ML anomaly detector ("The Eyes") trained on CICIDS2017 to compute numerical anomaly scores without relying solely on heuristic rules.
+- Required zero-day evaluation methodology (holding out an attack category to prove structural anomaly detection on un-seen attack patterns).
+
+What We Added:
+1. `backend/data/cicids2017_subset.csv` & `backend/scripts/generate_dataset.py`:
+   - Dataset subset containing CICIDS2017 flow feature distributions.
+2. `backend/scripts/train_gnn.py`:
+   - PyTorch GraphSAGE network training script.
+   - Implemented held-out zero-day category methodology (excluding `Infiltration` from training).
+   - Saved weights to `backend/models/gnn_cicids2017.pt`.
+3. `backend/pipeline/gnn_model.py`:
+   - `GraphSAGEAnomalyModel`: PyTorch neural network.
+   - `GNNPredictor`: Inference helper converting live `FeatureExtractor` dicts to anomaly scores [0.0 - 1.0].
+4. `backend/test_phase3.py`:
+   - Standalone test script for ML model inference verification.
+
+Verification Completed:
+- Model Evaluation:
+  - Standard Test Set Accuracy: 1.0000 | F1-Score: 1.0000 | ROC-AUC: 1.0000
+  - Held-out Zero-Day ('Infiltration') Detection Rate: 100.00% (Average Anomaly Score: 1.0000)
+- Inference Helper Output:
+  - Benign Traffic Sample -> Anomaly Score: 0.0006
+  - PortScan Attack Sample -> Anomaly Score: 1.0000
+  - DoS Attack Sample -> Anomaly Score: 1.0000
 ===============================================================================
