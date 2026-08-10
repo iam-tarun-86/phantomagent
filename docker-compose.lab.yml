@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  juice_shop:
+    image: bkimminich/juice-shop:latest
+    container_name: juice_shop
+    ports:
+      - "3000:3000"
+    networks:
+      phantom-lab:
+        ipv4_address: 172.28.0.5
+
+  kali_attacker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.kali
+    container_name: kali_attacker
+    stdin_open: true
+    tty: true
+    networks:
+      phantom-lab:
+        ipv4_address: 172.28.0.10
+
+networks:
+  phantom-lab:
+    name: phantom-lab
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
