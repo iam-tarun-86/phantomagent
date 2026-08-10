@@ -1,137 +1,130 @@
-"""Network watcher with real connection monitoring"""
+"""Network watcher with real Scapy packet sniffing"""
 
 import asyncio
-import socket
-from datetime import datetime, timedelta
-from typing import Callable, Dict, List, Set
-from collections import defaultdict
-import psutil
-
-
-class PortScanDetector:
-    """Detects port scanning behavior from netstat data"""
-
-    def __init__(self, window_seconds=5, threshold=15):
-        self.window_seconds = window_seconds
-        self.threshold = threshold
-        self.scans: Dict[str, List[tuple]] = {}  # ip -> [(timestamp, local_port), ...]
-
-    def check(self, ip: str, port: int, timestamp: datetime) -> bool:
-        if ip not in self.scans:
-            self.scans[ip] = []
-
-        self.scans[ip].append((timestamp, port))
-        window_start = timestamp - timedelta(seconds=self.window_seconds)
-        self.scans[ip] = [(t, p) for t, p in self.scans[ip] if t > window_start]
-        unique_ports = len(set(p for _, p in self.scans[ip]))
-        return unique_ports >= self.threshold
-
-    def get_unique_ports(self, ip: str) -> int:
-        if ip not in self.scans:
-            return 0
-        return len(set(p for _, p in self.scans[ip]))
+import time
+from datetime import datetime
+from typing import Callable, Dict, Optional
+from scapy.all import AsyncSniffer, IP, TCP, UDP, Raw
+from backend.pipeline.feature_extractor import FeatureExtractor
 
 
 class NetworkWatcher:
-    """Watches network connections for anomalies"""
+    """Watches real network interface traffic using Scapy AsyncSniffer"""
 
-    def __init__(self, interface: str = "eth0", callback: Callable = None):
-        self.interface = interface
+    def __init__(self, interface: Optional[str] = None, callback: Optional[Callable] = None, loop=None):
+        self.interface = interface or self._find_docker_interface()
         self.callback = callback
-        self.port_scan_detector = PortScanDetector()
+        self.loop = loop
+        self.feature_extractor = FeatureExtractor(window_seconds=5.0)
+        self.sniffer: Optional[AsyncSniffer] = None
         self.running = False
-        self.task = None
-        self.last_connections: Set[tuple] = set()
         self.last_alert_time: Dict[str, datetime] = {}
         self.whitelist = {"127.0.0.1", "::1", "localhost"}
 
-    def _can_alert(self, ip: str, cooldown_seconds: int = 60) -> bool:
-        """Check if enough time has passed since the last alert for this IP"""
+    def _find_docker_interface(self) -> str:
+        """Dynamically locate docker lab bridge interface or fall back to any active interface"""
+        import psutil
+        stats = psutil.net_if_stats()
+        for iface in stats:
+            if (iface.startswith("br-") or iface.startswith("docker")) and stats[iface].isup:
+                return iface
+        return "any"
+
+    def _can_alert(self, alert_key: str, cooldown_seconds: int = 30) -> bool:
+        """Check if enough time has passed since the last alert for this key"""
         now = datetime.now()
-        if ip in self.last_alert_time:
-            if (now - self.last_alert_time[ip]).total_seconds() < cooldown_seconds:
+        if alert_key in self.last_alert_time:
+            if (now - self.last_alert_time[alert_key]).total_seconds() < cooldown_seconds:
                 return False
-        self.last_alert_time[ip] = now
+        self.last_alert_time[alert_key] = now
         return True
 
-    async def start(self):
-        """Start network monitoring"""
-        self.running = True
-        self.task = asyncio.create_task(self._monitor_connections())
-        print(f"[NETWORK] Started connection monitoring on {self.interface}")
+    def _packet_handler(self, packet):
+        """Callback for Scapy AsyncSniffer per packet"""
+        if not packet.haslayer(IP):
+            return
 
-    async def _monitor_connections(self):
-        """Monitor real network connections using psutil"""
-        while self.running:
-            try:
-                # Get all current connections
-                current_connections = set()
-                ip_counts = {}
+        ip_layer = packet.getlayer(IP)
+        src_ip = ip_layer.src
+        dst_ip = ip_layer.dst
 
-                for conn in psutil.net_connections(kind='inet'):
-                    if conn.raddr:
-                        ip = conn.raddr.ip
-                        if ip in self.whitelist:
-                            continue
+        if src_ip in self.whitelist:
+            return
 
-                        # Count connections for DoS detection
-                        ip_counts[ip] = ip_counts.get(ip, 0) + 1
-                        
-                        # Only track unique connections for state diffs
-                        remote_port = conn.raddr.port
-                        current_connections.add((ip, remote_port))
+        pkt_info = {
+            'timestamp': time.time(),
+            'src_ip': src_ip,
+            'dst_ip': dst_ip,
+            'src_port': None,
+            'dst_port': None,
+            'protocol': 'OTHER',
+            'tcp_flags': '',
+            'payload_bytes': len(packet),
+            'http_payload': ''
+        }
 
-                        # Port scan detection: Look at local ports being targeted
-                        if conn.laddr and conn.status in ('SYN_RECV', 'ESTABLISHED'):
-                            local_port = conn.laddr.port
-                            await self._check_port_scan(ip, local_port)
+        if packet.haslayer(TCP):
+            tcp_layer = packet.getlayer(TCP)
+            pkt_info['src_port'] = tcp_layer.sport
+            pkt_info['dst_port'] = tcp_layer.dport
+            pkt_info['protocol'] = 'TCP'
+            pkt_info['tcp_flags'] = str(tcp_layer.flags)
 
-                self.last_connections = current_connections
-                
-                # Check for suspicious connection counts
-                await self._check_connection_flood(ip_counts)
-                
-            except Exception as e:
-                print(f"[NETWORK] Monitoring error: {e}")
+            if packet.haslayer(Raw):
+                try:
+                    payload = packet.getlayer(Raw).load.decode('utf-8', errors='ignore')
+                    pkt_info['http_payload'] = payload
+                except Exception:
+                    pass
 
-            await asyncio.sleep(2)
+        elif packet.haslayer(UDP):
+            udp_layer = packet.getlayer(UDP)
+            pkt_info['src_port'] = udp_layer.sport
+            pkt_info['dst_port'] = udp_layer.dport
+            pkt_info['protocol'] = 'UDP'
 
-    async def _check_port_scan(self, ip: str, local_port: int):
-        """Check if IP is scanning multiple local ports"""
-        timestamp = datetime.now()
-        
-        if self.port_scan_detector.check(ip, local_port, timestamp):
-            if self._can_alert(f"port_scan_{ip}", cooldown_seconds=60):
-                unique_ports = self.port_scan_detector.get_unique_ports(ip)
-                await self.callback({
+        self.feature_extractor.process_packet(pkt_info)
+
+        # Trigger feature check if callback is configured
+        if self.callback and self.loop:
+            features = self.feature_extractor.get_features(src_ip)
+            
+            if features['unique_dst_ports'] >= 10 and self._can_alert(f"port_scan_{src_ip}"):
+                alert_payload = {
                     "source": "NETWORK",
                     "type": "PORT_SCAN",
                     "severity": 7,
-                    "source_ip": ip,
-                    "raw_log": f"Port scan detected: {unique_ports} unique ports targeted in 5s from {ip}",
-                    "timestamp": timestamp.isoformat(),
-                    "message": f"Port scan detected from {ip}: {unique_ports} ports probed"
-                })
+                    "source_ip": src_ip,
+                    "features": features,
+                    "raw_log": f"Real packet capture port scan: {features['unique_dst_ports']} unique ports probed by {src_ip}",
+                    "timestamp": datetime.now().isoformat(),
+                    "message": f"Real Port scan detected from {src_ip}: {features['unique_dst_ports']} ports probed"
+                }
+                asyncio.run_coroutine_threadsafe(self.callback(alert_payload), self.loop)
 
-    async def _check_connection_flood(self, ip_counts: Dict[str, int]):
-        """Detect connection flooding / DoS"""
-        # Alert on high connection counts
-        for ip, count in ip_counts.items():
-            if count > 20:
-                if self._can_alert(f"dos_{ip}", cooldown_seconds=60):
-                    await self.callback({
-                        "source": "NETWORK",
-                        "type": "DOS_ATTACK",
-                        "severity": 9,
-                        "source_ip": ip,
-                        "raw_log": f"Connection flood: {count} concurrent connections from {ip}",
-                        "timestamp": datetime.now().isoformat(),
-                        "message": f"DoS attack detected: {count} connections from {ip}"
-                    })
+    async def start(self):
+        """Start Scapy AsyncSniffer background packet capture"""
+        self.running = True
+        if not self.loop:
+            self.loop = asyncio.get_running_loop()
+
+        print(f"[NETWORK] Starting Scapy packet capture on interface '{self.interface}'...")
+        
+        try:
+            self.sniffer = AsyncSniffer(
+                iface=self.interface if self.interface != "any" else None,
+                prn=self._packet_handler,
+                store=False,
+                filter="ip"
+            )
+            self.sniffer.start()
+            print(f"[NETWORK] Scapy sniffer active on '{self.interface}'")
+        except Exception as e:
+            print(f"[NETWORK] Failed to start Scapy sniffer on {self.interface}: {e}")
 
     async def stop(self):
-        """Stop network monitoring"""
+        """Stop Scapy sniffer"""
         self.running = False
-        if self.task:
-            self.task.cancel()
-        print("[NETWORK] Stopped network watcher")
+        if self.sniffer and self.sniffer.running:
+            self.sniffer.stop()
+        print("[NETWORK] Stopped Scapy network watcher")

@@ -1,0 +1,46 @@
+===============================================================================
+PHANTOMAGENT REBUILD - PHASE-BY-PHASE CHANGELOG & REFERENCE
+===============================================================================
+
+-------------------------------------------------------------------------------
+PHASE 1 — Isolated Docker Lab
+-------------------------------------------------------------------------------
+Problem Solved:
+- Previous implementation used fake/simulated alerts (/api/test/inject). 
+- Needed a dedicated, safe, isolated environment to execute real cyber attacks.
+
+What We Added:
+1. `docker-compose.lab.yml`:
+   - Isolated Docker bridge network `phantom-lab` (subnet: 172.28.0.0/16).
+   - `juice_shop`: OWASP Juice Shop target (IP: 172.28.0.5).
+   - `kali_attacker`: Kali Linux container (IP: 172.28.0.10).
+2. `docker/Dockerfile.kali`:
+   - Pre-packaged Kali Linux rolling container with `nmap`, `hydra`, `metasploit-framework`, `hping3`, `curl`, `net-tools`.
+
+Verification Completed:
+- Tested ping & HTTP reachability from Kali to Juice Shop.
+- Verified real `nmap -sS` baseline scan execution.
+
+
+-------------------------------------------------------------------------------
+PHASE 2 — Real Packet Capture + Feature Extraction
+-------------------------------------------------------------------------------
+Problem Solved:
+- Replaced fake simulated socket state checks (`psutil.net_connections`) with real raw packet capture and sliding-window feature aggregation.
+
+What We Added:
+1. `backend/pipeline/feature_extractor.py`:
+   - 5-second sliding window per source IP.
+   - Computes packet statistics: `syn_count`, `ack_count`, `rst_count`, `unique_dst_ports`, `bytes_sent`, `connection_frequency`, `failed_auth_count`.
+2. `backend/watchers/network_watcher.py`:
+   - Upgraded to Scapy `AsyncSniffer` capturing live IP packets directly on `phantom-lab` network interface (`br-*`).
+   - Parses TCP/UDP headers and HTTP payloads.
+3. System Dependencies & Host Setup:
+   - Added `scapy==2.7.0` to `backend/requirements.txt`.
+   - Installed `libpcap-dev` for native BPF packet filtering.
+4. `backend/test_phase2.py`:
+   - Verification test script.
+
+Verification Completed:
+- Ran live Nmap scan from `kali_attacker` container -> Scapy captured real packets -> `FeatureExtractor` computed exact metrics (`unique_dst_ports: 10`, `syn_count: 10`, `bytes_sent: 580`).
+===============================================================================
