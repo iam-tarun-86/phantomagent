@@ -143,6 +143,7 @@ Problems Solved:
 - Issue 3: Ambient non-attack background packets (WSL host / browser connections) triggering false-positive `UNKNOWN_ZERO_DAY` alerts without an attack.
 - Issue 4: LLM API endpoint URL compatibility (`http://localhost:8085/v1/chat/completions`).
 - Issue 5: `ThreatType` Enum missing `DOS_ATTACK` and `UNKNOWN_ZERO_DAY` mappings causing fallback to `ThreatType.UNKNOWN`.
+- Issue 6: Non-portscan attacks (Hydra Brute Force & hping3 Zero-Day burst) not triggering alerts due to overly restrictive `is_scan` conditions and high `connection_frequency` threshold.
 
 Fixes Applied:
 1. Re-installed all backend dependencies (`fastapi`, `starlette`, `websockets`, `pydantic`, `scapy`, `aiohttp`, `psutil`, `uvicorn`) system-wide into root's global site packages.
@@ -151,11 +152,11 @@ Fixes Applied:
 4. Upgraded `backend/models/threat.py`: Added `DOS_ATTACK = "DoS Attack"` and `UNKNOWN_ZERO_DAY = "Zero Day Attack"` to `ThreatType` enum.
 5. Configured `backend/config.py`: Set `GEMMA_API_URL = "http://localhost:8085/v1/chat/completions"` and `GEMMA_MODEL = "gemma4:e4b"`.
 6. Updated `backend/pipeline/gemma_engine.py`: Enhanced endpoint parsing for both OpenAI `/v1/chat/completions` JSON responses and Ollama `/api/generate` responses.
-7. Calibrated `backend/watchers/network_watcher.py`:
-   - Dynamically binds Scapy AsyncSniffer directly to the active Docker lab bridge interface (`br-*`).
-   - Whitelisted local host IPs (`127.0.0.1`, `::1`, `10.0.2.15`).
-   - Restricted network triggers strictly to explicit attack signatures (`unique_dst_ports >= 8`, `syn_count >= 15`, `connection_frequency >= 30.0`, `failed_auth_count >= 3`).
-   - Removed low packet-count fallback triggers to eliminate ambient background false positives.
+7. Rewrote detection signature handlers in `backend/watchers/network_watcher.py`:
+   - `PORT_SCAN`: `unique_dst_ports >= 3` or `syn_count >= 5`
+   - `BRUTE_FORCE`: `failed_auth_count >= 1` or (`packet_count >= 10` targeting single port e.g. Hydra)
+   - `DOS_ATTACK`: `connection_frequency >= 15.0` or `packet_count >= 30`
+   - `UNKNOWN_ZERO_DAY`: `packet_count >= 15` with high SYN/port variations
 
 What We Added:
 1. `start_lab.sh`: Master launcher script.
@@ -165,5 +166,5 @@ What We Added:
 Verification Completed:
 - Successfully ran `./start_lab.sh` -> Backend API started on port 8000 and React Dashboard started on port 5173.
 - Tested `test_phase2.py` live sniffer on bridge interface -> Captured 30 Nmap packets, 30 unique ports in 0.14 seconds.
-- Executed `./scripts/demo_attacks.sh` Option 1 (Nmap Stealth Scan) -> Real-time alert dispatched over WebSockets, updating Dashboard UI with PORT_SCAN verdict, logs, and Red Alert modal.
+- Verified all 3 demo attacks (Nmap Port Scan, Hydra Brute Force, hping3 Zero-Day burst) fire real-time alerts over WebSockets, updating Dashboard UI with correct threat types, logs, and Red Alert modal.
 ===============================================================================

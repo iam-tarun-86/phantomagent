@@ -35,7 +35,7 @@ class NetworkWatcher:
                 return iface
         return "any"
 
-    def _can_alert(self, alert_key: str, cooldown_seconds: int = 20) -> bool:
+    def _can_alert(self, alert_key: str, cooldown_seconds: int = 5) -> bool:
         """Check if enough time has passed since the last alert for this key"""
         now = datetime.now()
         if alert_key in self.last_alert_time:
@@ -95,25 +95,40 @@ class NetworkWatcher:
         if self.callback and self.loop:
             features = self.feature_extractor.get_features(src_ip)
             
-            # Strict attack signatures only (no generic packet_count triggers)
+            # Attack Signatures:
+            # 1. PORT_SCAN: Multiple destination ports probed or high SYN rate
             is_scan = features['unique_dst_ports'] >= 3 or features['syn_count'] >= 5
-            is_dos = features['connection_frequency'] >= 30.0
-            is_bruteforce = features['failed_auth_count'] >= 3
+            
+            # 2. DOS_ATTACK / HIGH FLOOD: High packet count or high connection frequency
+            is_dos = features['connection_frequency'] >= 15.0 or features['packet_count'] >= 30
+            
+            # 3. BRUTE_FORCE: High HTTP/TCP request volume targeting web/SSH service or failed auths
+            is_bruteforce = features['failed_auth_count'] >= 1 or (features['packet_count'] >= 10 and features['unique_dst_ports'] == 1)
 
-            if (is_scan or is_dos or is_bruteforce) and self._can_alert(f"threat_{src_ip}"):
-                threat_type = "PORT_SCAN" if is_scan else ("DOS_ATTACK" if is_dos else "BRUTE_FORCE")
-                
-                alert_payload = {
-                    "source": "NETWORK",
-                    "type": threat_type,
-                    "severity": 7 if threat_type == "PORT_SCAN" else (9 if threat_type == "DOS_ATTACK" else 8),
-                    "source_ip": src_ip,
-                    "features": features,
-                    "raw_log": f"Real packet capture threat: {threat_type} detected from {src_ip} ({features['packet_count']} pkts, {features['unique_dst_ports']} ports)",
-                    "timestamp": datetime.now().isoformat(),
-                    "message": f"Real {threat_type} detected from {src_ip}: {features['unique_dst_ports']} unique ports probed"
-                }
-                asyncio.run_coroutine_threadsafe(self.callback(alert_payload), self.loop)
+            # 4. UNKNOWN_ZERO_DAY: High packet burst on non-standard ports or structural anomaly
+            is_zeroday = features['packet_count'] >= 15 and (features['syn_count'] >= 10 or features['unique_dst_ports'] >= 2)
+
+            if is_scan and self._can_alert(f"scan_{src_ip}"):
+                self._dispatch_alert("PORT_SCAN", 7, src_ip, features, "Real Port scan detected")
+            elif is_bruteforce and self._can_alert(f"brute_{src_ip}"):
+                self._dispatch_alert("BRUTE_FORCE", 8, src_ip, features, "Real Brute Force / Credential Spraying detected")
+            elif is_dos and self._can_alert(f"dos_{src_ip}"):
+                self._dispatch_alert("DOS_ATTACK", 9, src_ip, features, "Real DoS connection flood detected")
+            elif is_zeroday and self._can_alert(f"zeroday_{src_ip}"):
+                self._dispatch_alert("UNKNOWN_ZERO_DAY", 8, src_ip, features, "Un-labeled Zero-Day Structural Anomaly detected")
+
+    def _dispatch_alert(self, threat_type: str, severity: int, src_ip: str, features: Dict, msg: str):
+        alert_payload = {
+            "source": "NETWORK",
+            "type": threat_type,
+            "severity": severity,
+            "source_ip": src_ip,
+            "features": features,
+            "raw_log": f"Real packet capture threat: {threat_type} from {src_ip} ({features['packet_count']} pkts, {features['unique_dst_ports']} ports)",
+            "timestamp": datetime.now().isoformat(),
+            "message": f"{msg} from {src_ip}: {features['packet_count']} pkts processed"
+        }
+        asyncio.run_coroutine_threadsafe(self.callback(alert_payload), self.loop)
 
     async def start(self):
         """Start Scapy AsyncSniffer background packet capture"""
