@@ -138,33 +138,48 @@ Verification Completed:
 PHASE 7 — Demo Packaging & Comprehensive System Calibration
 -------------------------------------------------------------------------------
 Problems Solved:
-- Issue 1: `uvicorn` and `fastapi` module missing error (`ModuleNotFoundError: No module named 'fastapi'`) when launching `start_lab.sh` under `sudo` environment.
-- Issue 2: Scapy AsyncSniffer background thread callback loop dispatch mismatch (`run_coroutine_threadsafe` target event loop missing in `main.py`).
-- Issue 3: Ambient non-attack background packets (WSL host / browser connections) triggering false-positive `UNKNOWN_ZERO_DAY` alerts without an attack.
+- Issue 1: `uvicorn` and `fastapi` missing when launching `start_lab.sh` under `sudo` environment.
+- Issue 2: Scapy AsyncSniffer background thread callback loop dispatch mismatch.
+- Issue 3: Ambient background packets triggering false-positive alerts.
 - Issue 4: LLM API endpoint URL compatibility (`http://localhost:8085/v1/chat/completions`).
-- Issue 5: `ThreatType` Enum missing `DOS_ATTACK` and `UNKNOWN_ZERO_DAY` mappings causing fallback to `ThreatType.UNKNOWN`.
-- Issue 6: Non-portscan attacks (Hydra Brute Force & hping3 Zero-Day burst) not triggering alerts due to overly restrictive `is_scan` conditions and high `connection_frequency` threshold.
+- Issue 5: `ThreatType` Enum missing `DOS_ATTACK` and `UNKNOWN_ZERO_DAY` mappings.
+- Issue 6: Non-portscan attacks not triggering (overly restrictive thresholds).
+- Issue 7: `start.sh` ran backend without `sudo`, preventing Scapy from raw packet sniffing.
+  Root Cause: `backend/venv/bin/python run.py` runs without root privileges. Scapy requires
+  root/sudo to open raw sockets for packet capture. Without sudo, Scapy silently fails to
+  capture any packets, meaning NO attacks are ever detected.
+  Fix: Updated `start.sh` to run `sudo backend/venv/bin/python run.py` with full PYTHONPATH.
+- Issue 8: `kali_attacker` Docker container not running when `demo_attacks.sh` is executed.
+  Root Cause: `docker-compose.lab.yml` containers stop when host system reboots or after
+  `docker stop`. `demo_attacks.sh` never checked container status before running attacks.
+  Fix: Added automatic container pre-check and auto-start (`docker compose up -d`) in both
+  `start.sh` and `demo_attacks.sh` with connectivity verification before any attack runs.
+- Issue 9: `torch` not installed in `backend/venv` causing `ModuleNotFoundError` in `run.py`.
+  Fix: Installed `torch 2.13.0+cpu` and `torch-geometric` into `backend/venv`.
 
 Fixes Applied:
-1. Re-installed all backend dependencies (`fastapi`, `starlette`, `websockets`, `pydantic`, `scapy`, `aiohttp`, `psutil`, `uvicorn`) system-wide into root's global site packages.
-2. Updated `start_lab.sh` to explicitly add system dist-packages (`/usr/local/lib/python3.12/dist-packages`) to `PYTHONPATH`.
-3. Updated `backend/main.py` lifespan setup to explicitly pass `asyncio.get_running_loop()` into `NetworkWatcher` initialization, allowing live packet sniffer alerts to cleanly dispatch to WebSockets and render in real-time on the React UI.
-4. Upgraded `backend/models/threat.py`: Added `DOS_ATTACK = "DoS Attack"` and `UNKNOWN_ZERO_DAY = "Zero Day Attack"` to `ThreatType` enum.
-5. Configured `backend/config.py`: Set `GEMMA_API_URL = "http://localhost:8085/v1/chat/completions"` and `GEMMA_MODEL = "gemma4:e4b"`.
-6. Updated `backend/pipeline/gemma_engine.py`: Enhanced endpoint parsing for both OpenAI `/v1/chat/completions` JSON responses and Ollama `/api/generate` responses.
-7. Rewrote detection signature handlers in `backend/watchers/network_watcher.py`:
-   - `PORT_SCAN`: `unique_dst_ports >= 3` or `syn_count >= 5`
-   - `BRUTE_FORCE`: `failed_auth_count >= 1` or (`packet_count >= 10` targeting single port e.g. Hydra)
-   - `DOS_ATTACK`: `connection_frequency >= 15.0` or `packet_count >= 30`
-   - `UNKNOWN_ZERO_DAY`: `packet_count >= 15` with high SYN/port variations
+1. `start.sh`: Rewrote to auto-start Docker lab, run backend with `sudo` for Scapy, start React frontend.
+2. `scripts/demo_attacks.sh`: Added container pre-check, auto-start, fallback HTTP rapid request
+   brute force, and proper hping3 zero-day burst command.
+3. `backend/watchers/network_watcher.py`: Calibrated all 4 attack signatures:
+   - PORT_SCAN: `unique_dst_ports >= 3` or `syn_count >= 5`
+   - BRUTE_FORCE: `failed_auth_count >= 1` or high request volume on single port
+   - DOS_ATTACK: `connection_frequency >= 15.0` or `packet_count >= 30`
+   - UNKNOWN_ZERO_DAY: `packet_count >= 15` with high SYN/port variations
+4. `backend/models/threat.py`: Added `DOS_ATTACK` and `UNKNOWN_ZERO_DAY` to `ThreatType` enum.
+5. `backend/config.py`: `NETWORK_INTERFACE = None` (dynamic bridge detection), `GEMMA_API_URL` set to port 8085.
+6. `backend/pipeline/gemma_engine.py`: Support OpenAI `/v1/chat/completions` response format.
+7. Installed all backend dependencies system-wide and in `backend/venv` for both `start.sh` and `start_lab.sh`.
 
 What We Added:
-1. `start_lab.sh`: Master launcher script.
-2. `scripts/demo_attacks.sh`: Interactive attack suite.
-3. `DEMO_PACKAGE.md`: Complete presentation & benchmark documentation.
+1. `start_lab.sh`: Master launcher script (uses `sudo PYTHONPATH=...`).
+2. `start.sh`: Simplified launcher using venv Python with sudo.
+3. `scripts/demo_attacks.sh`: Interactive attack suite with pre-checks.
+4. `DEMO_PACKAGE.md`: Complete presentation & benchmark documentation.
 
 Verification Completed:
-- Successfully ran `./start_lab.sh` -> Backend API started on port 8000 and React Dashboard started on port 5173.
-- Tested `test_phase2.py` live sniffer on bridge interface -> Captured 30 Nmap packets, 30 unique ports in 0.14 seconds.
-- Verified all 3 demo attacks (Nmap Port Scan, Hydra Brute Force, hping3 Zero-Day burst) fire real-time alerts over WebSockets, updating Dashboard UI with correct threat types, logs, and Red Alert modal.
+- `kali_attacker` and `juice_shop` containers start cleanly via `docker compose up -d`.
+- `backend/venv/bin/python` confirmed to have torch 2.13.0+cpu installed.
+- `start.sh` now runs backend with sudo enabling Scapy raw packet capture.
+- All 3 attack scenarios verified to generate real traffic that Scapy detects.
 ===============================================================================
