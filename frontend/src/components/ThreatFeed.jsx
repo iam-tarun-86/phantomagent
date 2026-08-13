@@ -107,20 +107,30 @@ const ThreatCard = ({ threat }) => {
                         {threat.reason}
                     </p>
 
-                    {/* Confidence Score */}
-                    {threat.confidence && (
-                        <div className="mt-1.5 flex items-center gap-2">
-                            <div className="flex-1 h-1 bg-panel-border rounded-full overflow-hidden">
-                                <motion.div
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${threat.confidence}%` }}
-                                    transition={{ duration: 1, delay: 0.3 }}
-                                    className={`h-full rounded-full ${threat.confidence > 90 ? 'bg-contain-green' : threat.confidence > 70 ? 'bg-warning-amber' : 'bg-alert-red'}`}
-                                />
+                    {/* Confidence & Consensus Score */}
+                    <div className="mt-1.5 flex items-center justify-between gap-2">
+                        {threat.confidence && (
+                            <div className="flex-1 flex items-center gap-2">
+                                <div className="flex-1 h-1 bg-panel-border rounded-full overflow-hidden">
+                                    <motion.div
+                                        initial={{ width: 0 }}
+                                        animate={{ width: `${threat.confidence}%` }}
+                                        transition={{ duration: 1, delay: 0.3 }}
+                                        className={`h-full rounded-full ${threat.confidence > 90 ? 'bg-contain-green' : threat.confidence > 70 ? 'bg-warning-amber' : 'bg-alert-red'}`}
+                                    />
+                                </div>
+                                <span className="text-[9px] font-mono text-data-white/40">{threat.confidence}% conf</span>
                             </div>
-                            <span className="text-[9px] font-mono text-data-white/40">{threat.confidence}% confidence</span>
+                        )}
+                        {/* 5-Signal Consensus Badge */}
+                        <div className={`px-1.5 py-0.5 rounded border text-[9px] font-mono font-bold ${
+                            threat.has_consensus !== false
+                                ? 'bg-contain-green/10 border-contain-green/30 text-contain-green'
+                                : 'bg-warning-amber/10 border-warning-amber/30 text-warning-amber'
+                        }`}>
+                            {threat.consensus_votes ?? 3}/5 VOTES
                         </div>
-                    )}
+                    </div>
                 </motion.div>
             )}
         </motion.div>

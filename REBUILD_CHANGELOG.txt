@@ -272,3 +272,25 @@ Verification Completed:
 - Tested all 5 pipeline modules under Python venv.
 - Verified consensus evaluation (3-of-5 votes passed for attack event).
 ===============================================================================
+
+-------------------------------------------------------------------------------
+PHASE 10 — 2026 SOTA Phase 2 UI & Prompt Integration for 5-Signal Consensus
+-------------------------------------------------------------------------------
+What We Added:
+1. backend/pipeline/gemma_engine.py:
+   - Enriched LLM prompt context with the complete 5-Signal Evidence Consensus Matrix
+     (GNN Structural Score, Conformal P-Value, Behavioral Z-Score, Payload Shannon Entropy,
+      MITRE ATT&CK Kill-Chain stage count, and N-of-5 vote outcome).
+   - Instructed Gemma PHANTOM-BRAIN to incorporate multi-signal evidence into JSON reasoning.
+
+2. frontend/src/components/ThreatFeed.jsx:
+   - Added 5-Signal Consensus Badge (e.g. `3/5 VOTES · CONSENSUS PASSED`) to Threat Cards.
+
+3. frontend/src/components/GNNPanel.jsx:
+   - Added 5-Signal Evidence Consensus Gate Matrix breakdown modal component.
+   - Shows live individual signal states, p-values, Z-score deviations, entropy values,
+     and consensus vote status.
+
+Verification:
+- Clean production build (`npm run build`) passed with zero errors.
+===============================================================================

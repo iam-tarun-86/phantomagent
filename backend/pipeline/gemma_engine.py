@@ -153,12 +153,24 @@ Respond ONLY in strict JSON. No markdown, no explanation outside JSON:
             return self._fallback_analysis(event)
 
     def _build_prompt(self, event: Dict[str, Any]) -> str:
-        """Construct structured prompt from features, GNN score, and watcher rule signal"""
+        """Construct structured prompt from features, GNN score, and 5-Signal Consensus Matrix"""
         features = event.get('features', {})
         gnn_score = event.get('gnn_score', 0.0)
         src_ip = event.get('source_ip', 'Unknown')
         rule_type = event.get('type', 'UNKNOWN')   # What the rule-based watcher already detected
         rule_sev = event.get('severity', 5)
+
+        # 5-Signal Consensus Matrix
+        consensus = event.get('consensus', {})
+        votes = consensus.get('vote_breakdown', {})
+        total_votes = consensus.get('total_votes', 0)
+        has_consensus = consensus.get('has_consensus', False)
+
+        conformal_p = consensus.get('conformal', {}).get('p_value', 1.0)
+        max_z = consensus.get('behavioral', {}).get('max_z_score', 0.0)
+        entropy_val = consensus.get('entropy', {}).get('entropy', 0.0)
+        entropy_sig = consensus.get('entropy', {}).get('signal', 'NORMAL')
+        kc_stages = consensus.get('killchain', {}).get('campaign_stage_count', 1)
 
         # Build GNN interpretation hint based on score
         if gnn_score >= 0.75:
@@ -178,6 +190,13 @@ Respond ONLY in strict JSON. No markdown, no explanation outside JSON:
 Source IP       : {src_ip}
 GNN Score       : {gnn_score:.4f}  [{gnn_hint}]{rule_context}
 
+=== 5-SIGNAL EVIDENCE CONSENSUS GATE MATRIX ({total_votes}/5 VOTES · {'PASSED' if has_consensus else 'NO CONSENSUS'}) ===
+  [Signal 1] GNN Structural Score : {gnn_score:.4f} ({'VOTE YES' if votes.get('gnn_structural') else 'VOTE NO'})
+  [Signal 2] Conformal P-Value    : p = {conformal_p:.4f} (95% guarantee: {'VOTE YES' if votes.get('conformal_pvalue') else 'VOTE NO'})
+  [Signal 3] Behavioral Z-Score   : Z = {max_z:.2f}σ deviation ({'VOTE YES' if votes.get('behavioral_zscore') else 'VOTE NO'})
+  [Signal 4] Payload Entropy      : H = {entropy_val:.4f} bits ({entropy_sig} -> {'VOTE YES' if votes.get('payload_entropy') else 'VOTE NO'})
+  [Signal 5] ATT&CK Campaign      : {kc_stages} kill-chain stages ({'VOTE YES' if votes.get('killchain_campaign') else 'VOTE NO'})
+
 === EXTRACTED PACKET FEATURES (5s sliding window) ===
   Packets Captured    : {features.get('packet_count', 0)}
   SYN Packets         : {features.get('syn_count', 0)}    (Nmap SYN scan indicator)
@@ -188,7 +207,7 @@ GNN Score       : {gnn_score:.4f}  [{gnn_hint}]{rule_context}
   Connection Freq     : {features.get('connection_frequency', 0.0):.2f} pkts/sec  (>15 = DoS pattern)
   Failed Auth Attempts: {features.get('failed_auth_count', 0)}  (>0 = brute force indicator)
 
-Apply PHANTOM-BRAIN rules. Return JSON verdict now."""
+Apply PHANTOM-BRAIN rules using 5-Signal evidence matrix. Return JSON verdict now."""
 
     def _fallback_analysis(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """Rule-based fallback when LLM API is unavailable"""
