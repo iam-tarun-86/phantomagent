@@ -25,12 +25,14 @@ class DecisionEngine:
 
     async def analyze_and_route(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Full Phase 5 & 6 Pipeline Processing:
-        Raw event features -> GNN Anomaly Score -> Gemma Verdict -> Decision Routing -> Event Logging
+        Full Pipeline Processing:
+        Raw event -> GNN Anomaly Score -> Gemma Verdict (fused with rule signal) -> Decision -> Log
         """
         features = event_data.get('features', {})
         src_ip = event_data.get('source_ip', 'unknown')
-        
+        rule_threat_type = event_data.get('type', 'UNKNOWN')   # Watcher's rule-based label
+        rule_severity = event_data.get('severity', 5)          # Watcher's assigned severity
+
         # 1. GNN 'Eyes': Predict structural anomaly score [0.0 - 1.0]
         gnn_score = self.gnn.predict_anomaly_score(features)
         event_data['gnn_score'] = gnn_score
@@ -39,10 +41,31 @@ class DecisionEngine:
         analysis = await self.gemma.analyze(event_data)
         analysis['gnn_score'] = gnn_score
 
-        # 3. Route decision by severity
+        # 3. FUSION: If watcher fired a known signature, trust it.
+        #    Only let Gemma override to BENIGN if GNN also agrees (score < 0.2).
+        #    This prevents the contradiction: "BRUTE_FORCE detected but GNN says BENIGN → Sev 9"
+        gemma_label = analysis.get('threat_type', 'UNKNOWN')
+        if rule_threat_type not in ('UNKNOWN', 'BENIGN') and gemma_label == 'BENIGN' and gnn_score >= 0.2:
+            # Watcher saw real attack signature + GNN agrees it's not benign → override Gemma
+            analysis['threat_type'] = rule_threat_type
+            analysis['severity'] = rule_severity
+            analysis['explanation'] = (
+                f"Rule-based detector confirmed {rule_threat_type} (GNN: {gnn_score:.4f}). "
+                f"Gemma label overridden — signature match takes precedence."
+            )
+        elif rule_threat_type not in ('UNKNOWN', 'BENIGN') and gemma_label == 'BENIGN' and gnn_score < 0.2:
+            # Both Gemma AND GNN say benign despite rule hit → lower severity, still log
+            analysis['threat_type'] = rule_threat_type
+            analysis['severity'] = max(3, rule_severity - 3)  # Downgrade severity
+            analysis['explanation'] = (
+                f"Rule signature fired ({rule_threat_type}) but GNN score {gnn_score:.4f} is benign. "
+                f"Possible false positive — severity downgraded."
+            )
+
+        # 4. Route decision by fused severity
         decision = self.decide(analysis)
-        
-        # 4. Phase 6 Event Logging: Persist event record to SQLite and JSONL
+
+        # 5. Log event
         self.logger.log_event(
             source_ip=src_ip,
             features=features,
@@ -50,12 +73,13 @@ class DecisionEngine:
             verdict=analysis,
             action_taken=decision['action']
         )
-        
+
         return {
             'analysis': analysis,
             'decision': decision,
             'gnn_score': gnn_score
         }
+
     
     def decide(self, analysis: Dict[str, Any]) -> Dict[str, Any]:
         """

@@ -40,11 +40,13 @@ class NetworkWatcher:
                 return iface
         return "any"
 
-    def _can_alert(self, alert_key: str, cooldown_seconds: int = 5) -> bool:
-        """Check if enough time has passed since the last alert for this key"""
+    def _can_alert(self, alert_key: str, cooldown_seconds: int = 30) -> bool:
+        """Check if enough time has passed since the last alert for this key.
+        Default cooldown raised to 30s so a Hydra/curl flood doesn't spam identical alerts."""
         now = datetime.now()
         if alert_key in self.last_alert_time:
-            if (now - self.last_alert_time[alert_key]).total_seconds() < cooldown_seconds:
+            elapsed = (now - self.last_alert_time[alert_key]).total_seconds()
+            if elapsed < cooldown_seconds:
                 return False
         self.last_alert_time[alert_key] = now
         return True
@@ -113,14 +115,17 @@ class NetworkWatcher:
             # 4. UNKNOWN_ZERO_DAY: High packet burst on non-standard ports or structural anomaly
             is_zeroday = features['packet_count'] >= 15 and (features['syn_count'] >= 10 or features['unique_dst_ports'] >= 2)
 
-            if is_scan and self._can_alert(f"scan_{src_ip}"):
-                self._dispatch_alert("PORT_SCAN", 7, src_ip, features, "Real Port scan detected")
-            elif is_bruteforce and self._can_alert(f"brute_{src_ip}"):
-                self._dispatch_alert("BRUTE_FORCE", 8, src_ip, features, "Real Brute Force / Credential Spraying detected")
-            elif is_dos and self._can_alert(f"dos_{src_ip}"):
-                self._dispatch_alert("DOS_ATTACK", 9, src_ip, features, "Real DoS connection flood detected")
+            # Priority order: DoS > Zero-Day > Brute Force > Port Scan
+            # Only ONE alert fires per evaluation — highest-priority match wins.
+            # Each type has its own 30s cooldown per source IP.
+            if is_dos and self._can_alert(f"dos_{src_ip}"):
+                self._dispatch_alert("DOS_ATTACK", 8, src_ip, features, "Real DoS connection flood detected")
             elif is_zeroday and self._can_alert(f"zeroday_{src_ip}"):
                 self._dispatch_alert("UNKNOWN_ZERO_DAY", 8, src_ip, features, "Un-labeled Zero-Day Structural Anomaly detected")
+            elif is_bruteforce and self._can_alert(f"brute_{src_ip}"):
+                self._dispatch_alert("BRUTE_FORCE", 7, src_ip, features, "Real Brute Force / Credential Spraying detected")
+            elif is_scan and self._can_alert(f"scan_{src_ip}"):
+                self._dispatch_alert("PORT_SCAN", 6, src_ip, features, "Real Port scan detected")
 
     def _dispatch_alert(self, threat_type: str, severity: int, src_ip: str, features: Dict, msg: str):
         alert_payload = {
