@@ -4,15 +4,17 @@ from typing import Dict, Any
 from backend.config import SEVERITY_THRESHOLDS
 from backend.pipeline.gnn_model import GNNPredictor
 from backend.pipeline.gemma_engine import GemmaEngine
+from backend.pipeline.consensus_gate import ConsensusGate
 from backend.utils.event_logger import EventLogger
 
 
 class DecisionEngine:
-    """Routes threats and integrates GNN ('Eyes') + Gemma ('Brain') reasoning"""
-    
+    """Routes threats and integrates GNN ('Eyes') + Gemma ('Brain') reasoning + Consensus Gate"""
+
     def __init__(self):
         self.gnn = GNNPredictor()
         self.gemma = GemmaEngine()
+        self.consensus_gate = ConsensusGate(required_consensus_votes=3)
         self.logger = EventLogger()
         self.stats = {
             'logged': 0,
@@ -26,7 +28,7 @@ class DecisionEngine:
     async def analyze_and_route(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Full Pipeline Processing:
-        Raw event -> GNN Anomaly Score -> Gemma Verdict (fused with rule signal) -> Decision -> Log
+        Raw event -> GNN Anomaly Score -> Consensus Gate (5 Signals) -> Gemma Verdict -> Decision -> Log
         """
         features = event_data.get('features', {})
         src_ip = event_data.get('source_ip', 'unknown')
@@ -37,35 +39,50 @@ class DecisionEngine:
         gnn_score = self.gnn.predict_anomaly_score(features)
         event_data['gnn_score'] = gnn_score
 
-        # 2. Gemma 'Brain': Generate structured JSON analysis
+        # 2. Consensus Gate (5-Signal Evidence Evaluation)
+        consensus_res = self.consensus_gate.evaluate(event_data, gnn_score)
+        event_data['consensus'] = consensus_res
+
+        # 3. Gemma 'Brain': Generate structured JSON analysis
         analysis = await self.gemma.analyze(event_data)
         analysis['gnn_score'] = gnn_score
+        analysis['consensus_votes'] = consensus_res['total_votes']
+        analysis['has_consensus'] = consensus_res['has_consensus']
 
-        # 3. FUSION: If watcher fired a known signature, trust it.
-        #    Only let Gemma override to BENIGN if GNN also agrees (score < 0.2).
-        #    This prevents the contradiction: "BRUTE_FORCE detected but GNN says BENIGN → Sev 9"
+        # 4. FUSION & CONSENSUS FILTER:
+        # If 3-of-5 signals agree OR watcher confirmed signature + GNN >= 0.2, escalate.
+        # If consensus fails (< 3 votes) and no strong rule match, downgrade severity to prevent False Positives.
         gemma_label = analysis.get('threat_type', 'UNKNOWN')
-        if rule_threat_type not in ('UNKNOWN', 'BENIGN') and gemma_label == 'BENIGN' and gnn_score >= 0.2:
-            # Watcher saw real attack signature + GNN agrees it's not benign → override Gemma
-            analysis['threat_type'] = rule_threat_type
-            analysis['severity'] = rule_severity
-            analysis['explanation'] = (
-                f"Rule-based detector confirmed {rule_threat_type} (GNN: {gnn_score:.4f}). "
-                f"Gemma label overridden — signature match takes precedence."
-            )
-        elif rule_threat_type not in ('UNKNOWN', 'BENIGN') and gemma_label == 'BENIGN' and gnn_score < 0.2:
-            # Both Gemma AND GNN say benign despite rule hit → lower severity, still log
-            analysis['threat_type'] = rule_threat_type
-            analysis['severity'] = max(3, rule_severity - 3)  # Downgrade severity
-            analysis['explanation'] = (
-                f"Rule signature fired ({rule_threat_type}) but GNN score {gnn_score:.4f} is benign. "
-                f"Possible false positive — severity downgraded."
-            )
 
-        # 4. Route decision by fused severity
+        if consensus_res['has_consensus']:
+            if rule_threat_type not in ('UNKNOWN', 'BENIGN'):
+                analysis['threat_type'] = rule_threat_type
+                analysis['severity'] = max(analysis.get('severity', 5), rule_severity)
+            analysis['explanation'] = (
+                f"Consensus Passed ({consensus_res['total_votes']}/5 signals agreed). "
+                f"Confirmed {analysis['threat_type']} (GNN: {gnn_score:.4f})."
+            )
+        else:
+            # Consensus failed (<3 votes) -> Downgrade severity to avoid alert noise / false positive
+            if rule_threat_type not in ('UNKNOWN', 'BENIGN') and gnn_score >= 0.2:
+                analysis['threat_type'] = rule_threat_type
+                analysis['severity'] = min(6, rule_severity)  # Cap at moderate severity
+                analysis['explanation'] = (
+                    f"Rule signature match ({rule_threat_type}) but Consensus Gate returned "
+                    f"{consensus_res['total_votes']}/5 votes. Moderate threat classification."
+                )
+            else:
+                analysis['severity'] = min(analysis.get('severity', 2), 3)  # Downgrade to LOG level
+                analysis['action'] = 'LOG'
+                analysis['explanation'] = (
+                    f"Consensus Gate failed ({consensus_res['total_votes']}/5 signals). "
+                    f"Suppressed potential false positive."
+                )
+
+        # 5. Route decision by fused severity
         decision = self.decide(analysis)
 
-        # 5. Log event
+        # 6. Log event
         self.logger.log_event(
             source_ip=src_ip,
             features=features,
@@ -77,7 +94,8 @@ class DecisionEngine:
         return {
             'analysis': analysis,
             'decision': decision,
-            'gnn_score': gnn_score
+            'gnn_score': gnn_score,
+            'consensus': consensus_res
         }
 
     

@@ -182,6 +182,8 @@ class DashboardState:
         threat_dict['indicators'] = threat_indicators
         threat_dict['gnn_score'] = round(gnn_score, 4)          # GNN anomaly score for frontend
         threat_dict['attack_pattern'] = analysis.get('attack_pattern', '')  # MITRE pattern label
+        threat_dict['consensus_votes'] = analysis.get('consensus_votes', 0)
+        threat_dict['has_consensus'] = analysis.get('has_consensus', False)
 
         # SAVE TO DATABASE
         db.save_threat(threat_dict)

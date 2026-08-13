@@ -231,3 +231,44 @@ Fixes Applied:
 
 7. DashboardContext.jsx — gnn_score + attack_pattern captured in React threat state.
 ===============================================================================
+
+-------------------------------------------------------------------------------
+PHASE 9 — 2026 SOTA Multi-Signal Consensus & Zero False Positive Pipeline
+-------------------------------------------------------------------------------
+Goal:
+- Upgrade PhantomAgent from GNN-only detection to 2026 State-of-the-Art (SOTA) Multi-Signal
+  Evidence Consensus architecture to eliminate false positives and alert fatigue.
+
+What We Added:
+1. backend/pipeline/entropy_analyzer.py (Shannon Payload Entropy):
+   - Computes byte-level Shannon entropy H(X) = -sum(p * log2(p)) in [0.0, 8.0] bits/byte.
+   - Detects encrypted C2, DNS exfil, ransomware headers (H > 7.2) and low-entropy exploit pads (H < 2.0).
+
+2. backend/pipeline/behavioral_fingerprint.py (Per-IP Rolling Z-Score Outlier Engine):
+   - Maintains rolling mean (mu) and std dev (sigma) per source IP across packet count,
+     unique destination ports, connection frequency, and SYN rates.
+   - Z = (X - mu) / sigma. High-activity hosts (e.g. backup servers) accumulate high baselines,
+     preventing false alerts (Z <= 2.0). Unseen IPs bursting activity trigger Z > 3.0 sigma.
+
+3. backend/pipeline/killchain_correlator.py (MITRE ATT&CK Temporal Campaign Tracker):
+   - Tracks per-IP progression across MITRE ATT&CK kill-chain stages (Recon -> Access -> Execution -> Exfil).
+   - Flag multi-step APT campaigns when an IP advances through >= 2 distinct stages in 1 hour.
+
+4. backend/pipeline/conformal_predictor.py (Statistical FPR Bounding):
+   - Calculates empirical p-values against benign calibration distributions.
+   - Bounds False Positive Rate (FPR) statistically to <= 5% (alpha = 0.05).
+
+5. backend/pipeline/consensus_gate.py (5-Signal Ensemble Gate):
+   - Integrates 5 independent detectors: GNN Anomaly Score, Conformal P-Value, Behavioral Z-Score,
+     Payload Shannon Entropy, and MITRE ATT&CK Kill-Chain progress.
+   - Enforces N-of-5 ensemble rule: Requires >= 3 positive votes to confirm threats.
+   - Suppresses single-anomaly noise to prevent alert fatigue.
+
+6. backend/pipeline/decision_engine.py & backend/main.py:
+   - Integrated ConsensusGate into full pipeline flow.
+   - Broadcast consensus votes and status over WebSocket telemetry.
+
+Verification Completed:
+- Tested all 5 pipeline modules under Python venv.
+- Verified consensus evaluation (3-of-5 votes passed for attack event).
+===============================================================================
