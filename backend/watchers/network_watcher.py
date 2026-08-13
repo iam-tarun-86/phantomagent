@@ -20,7 +20,12 @@ class NetworkWatcher:
         self.running = False
         self.last_alert_time: Dict[str, datetime] = {}
         # Whitelist localhost and local host IP ranges
-        self.whitelist = {"127.0.0.1", "::1", "localhost", "10.0.2.15"}
+        self.whitelist = {
+            "127.0.0.1", "::1", "localhost",
+            "10.0.2.15",       # WSL host
+            "172.28.0.1",      # Docker bridge gateway
+            "172.28.0.5",      # Juice Shop target — victim, not attacker
+        }
 
     def _find_docker_interface(self) -> str:
         """Dynamically locate docker lab bridge interface or fall back to any active interface"""
