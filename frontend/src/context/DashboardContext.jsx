@@ -110,7 +110,9 @@ export const DashboardProvider = ({ children }) => {
                 status: d.status,
                 reason: d.reason,
                 confidence: d.confidence,
-                indicators: d.indicators
+                indicators: d.indicators,
+                gnn_score: d.gnn_score ?? null,       // GNN anomaly score [0.0-1.0]
+                attack_pattern: d.attack_pattern ?? null,
             }, ...prev].slice(0, 20))),
             wsService.on('log', (d) => setLogs(prev => [...prev, d].slice(-50))),
             wsService.on('telemetry', (d) => setTelemetry(d)),

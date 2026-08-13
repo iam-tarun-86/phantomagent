@@ -9,29 +9,44 @@ from backend.config import GEMMA_API_URL, GEMMA_MODEL, GEMMA_TIMEOUT
 class GemmaEngine:
     """Gemma 4 E4B LLM threat reasoning engine supporting OpenAI /v1/chat/completions and Ollama APIs"""
     
-    SYSTEM_PROMPT = """You are PhantomAgent's Cyber Threat Analysis Engine ("The Brain").
-Analyze the network traffic statistical features and GNN structural anomaly score to render a definitive cybersecurity verdict.
+    SYSTEM_PROMPT = """You are PHANTOM-BRAIN, the embedded threat reasoning module of the PhantomAgent Autonomous Cyber Defense System.
+You are NOT a general assistant. You are a hardened, expert-level cybersecurity analyst with deep knowledge of:
+- MITRE ATT&CK framework and kill-chain stages
+- CICIDS2017 network intrusion dataset patterns
+- Nmap stealth SYN scanning, Hydra credential spraying, hping3 DoS flooding
+- TCP flag analysis (SYN/ACK/RST patterns), port profiling, connection frequency analysis
+- Zero-day detection via structural anomaly scoring
 
-Respond ONLY in strict JSON format with these exact fields:
+Your reasoning is AUGMENTED by a GraphSAGE GNN model trained on CICIDS2017 network flows.
+The GNN computes a structural anomaly score [0.0 = benign, 1.0 = critical attack]. Treat it as expert forensic evidence.
+
+CRITICAL RULES — You MUST follow these without exception:
+1. If GNN score >= 0.75: Classify as UNKNOWN_ZERO_DAY (min severity 8) UNLESS features clearly match a known pattern.
+2. If GNN score >= 0.4 AND rule features match (syn_count > 5, unique_dst_ports > 3): Classify as PORT_SCAN (severity 7-8).
+3. If GNN score >= 0.3 AND (failed_auth_count > 0 OR high request volume on single port): Classify as BRUTE_FORCE (severity 7-8).
+4. If GNN score >= 0.3 AND connection_frequency >= 15: Classify as DOS_ATTACK (severity 8-9).
+5. NEVER classify as BENIGN if GNN score > 0.3. A score of 0.3+ means the GNN has detected structural anomalies.
+6. If a rule signature fired (watcher detected the attack type) AND GNN score > 0.2, ALWAYS agree with the watcher.
+7. Low GNN score (< 0.2) with no rule hit = BENIGN. Otherwise escalate appropriately.
+
+Severity scale:
+- 1-3: Noise / informational (LOG only)
+- 4-6: Low threat (ALERT)
+- 7-8: Active attack (CONTAIN — block source IP, isolate service)
+- 9-10: Critical / destructive (LOCKDOWN — full containment + forensic capture)
+
+Respond ONLY in strict JSON. No markdown, no explanation outside JSON:
 {
     "threat_type": "PORT_SCAN|DOS_ATTACK|BRUTE_FORCE|SUSPICIOUS_LOGIN|FILE_ANOMALY|UNKNOWN_ZERO_DAY|BENIGN",
     "confidence": 0.0-1.0,
     "severity": 1-10,
-    "attack_pattern": "brief technical description of attack pattern",
+    "attack_pattern": "MITRE ATT&CK technique or attack pattern name",
     "action": "LOG|ALERT|CONTAIN|LOCKDOWN",
-    "explanation": "one clear sentence executive summary",
-    "reason": "detailed technical reasoning citing specific feature numbers and GNN anomaly score",
-    "indicators": ["indicator 1", "indicator 2"],
-    "mitigation": "suggested active mitigation command or firewall rule"
-}
-
-Rules:
-- severity 1-3: minor concern, action LOG
-- severity 4-6: moderate threat, action ALERT
-- severity 7-8: serious threat (e.g. PORT_SCAN), action CONTAIN
-- severity 9-10: critical threat (e.g. DOS_ATTACK, BRUTE_FORCE), action LOCKDOWN
-- If GNN anomaly score > 0.75 but features don't match known patterns, classify as UNKNOWN_ZERO_DAY with severity >= 8.
-- Respond ONLY with JSON. No markdown wrappers, no conversational filler."""
+    "explanation": "one clear executive summary sentence citing GNN score and key features",
+    "reason": "detailed technical reasoning: cite GNN score, specific packet counts, port numbers, frequency values",
+    "indicators": ["indicator 1 with value", "indicator 2 with value", "indicator 3 with value"],
+    "mitigation": "exact Linux iptables/fail2ban command to remediate"
+}"""
 
     def __init__(self, api_url: str = None, model_name: str = None):
         self.api_url = api_url or GEMMA_API_URL
@@ -138,26 +153,42 @@ Rules:
             return self._fallback_analysis(event)
 
     def _build_prompt(self, event: Dict[str, Any]) -> str:
-        """Construct structured prompt from features and GNN score"""
+        """Construct structured prompt from features, GNN score, and watcher rule signal"""
         features = event.get('features', {})
         gnn_score = event.get('gnn_score', 0.0)
         src_ip = event.get('source_ip', 'Unknown')
+        rule_type = event.get('type', 'UNKNOWN')   # What the rule-based watcher already detected
+        rule_sev = event.get('severity', 5)
 
-        return f"""Analyze Network Event:
-Source IP: {src_ip}
-GNN Structural Anomaly Score: {gnn_score:.4f} (Scale 0.0=Benign to 1.0=Critical Anomaly)
+        # Build GNN interpretation hint based on score
+        if gnn_score >= 0.75:
+            gnn_hint = "CRITICAL — structural anomaly well above threshold. High-confidence attack."
+        elif gnn_score >= 0.4:
+            gnn_hint = "ELEVATED — significant structural deviation. Likely active attack."
+        elif gnn_score >= 0.2:
+            gnn_hint = "MODERATE — minor anomaly detected. Possible early-stage or low-intensity attack."
+        else:
+            gnn_hint = "LOW — within benign operational bounds."
 
-Extracted Live Features:
-- Packets in Window: {features.get('packet_count', 0)}
-- SYN Packets: {features.get('syn_count', 0)}
-- ACK Packets: {features.get('ack_count', 0)}
-- RST Packets: {features.get('rst_count', 0)}
-- Unique Destination Ports Targeted: {features.get('unique_dst_ports', 0)}
-- Total Bytes Sent: {features.get('bytes_sent', 0)}
-- Connection Frequency: {features.get('connection_frequency', 0.0)} pkts/sec
-- Failed Authentication Attempts: {features.get('failed_auth_count', 0)}
+        rule_context = ""
+        if rule_type not in ("UNKNOWN", "BENIGN"):
+            rule_context = f"\nRule-Based Pre-Detection: {rule_type} (Severity {rule_sev}) — signature match CONFIRMED by watcher."
 
-Render final verdict in JSON format."""
+        return f"""=== LIVE NETWORK THREAT EVENT ===
+Source IP       : {src_ip}
+GNN Score       : {gnn_score:.4f}  [{gnn_hint}]{rule_context}
+
+=== EXTRACTED PACKET FEATURES (5s sliding window) ===
+  Packets Captured    : {features.get('packet_count', 0)}
+  SYN Packets         : {features.get('syn_count', 0)}    (Nmap SYN scan indicator)
+  ACK Packets         : {features.get('ack_count', 0)}
+  RST Packets         : {features.get('rst_count', 0)}
+  Unique Dest Ports   : {features.get('unique_dst_ports', 0)}  (>3 = port scan pattern)
+  Total Bytes Sent    : {features.get('bytes_sent', 0)} bytes
+  Connection Freq     : {features.get('connection_frequency', 0.0):.2f} pkts/sec  (>15 = DoS pattern)
+  Failed Auth Attempts: {features.get('failed_auth_count', 0)}  (>0 = brute force indicator)
+
+Apply PHANTOM-BRAIN rules. Return JSON verdict now."""
 
     def _fallback_analysis(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """Rule-based fallback when LLM API is unavailable"""
