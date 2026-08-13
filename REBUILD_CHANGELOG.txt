@@ -183,3 +183,51 @@ Verification Completed:
 - `start.sh` now runs backend with sudo enabling Scapy raw packet capture.
 - All 3 attack scenarios verified to generate real traffic that Scapy detects.
 ===============================================================================
+
+-------------------------------------------------------------------------------
+PHASE 8 — Gemma Hardening, GNN Panel Dashboard, & Alert Deduplication
+-------------------------------------------------------------------------------
+Problems Solved:
+- Issue 1: Gemma is a general-purpose model (not a cybersecurity specialist). Prompt was too
+  generic — returned BENIGN even when GNN scored 0.03-0.14, causing contradictions like
+  "BRUTE_FORCE detected → Gemma says BENIGN → LOCKDOWN Sev 9".
+
+- Issue 2: Attack 2 (Hydra) produced 20+ log entries for a single attack because:
+  a) Alert cooldown was only 5s — Hydra sends packets faster than that.
+  b) All 4 alert types fired simultaneously per source IP per burst.
+
+- Issue 3: Juice Shop (172.28.0.5) was triggering false-positive Zero Day alerts from its RST
+  response traffic — the victim being flagged as the attacker.
+
+- Issue 4: GNN score was never visible in the dashboard. No way for operators to see ML verdicts.
+
+Fixes Applied:
+
+1. gemma_engine.py — PHANTOM-BRAIN prompt hardening:
+   - Rebranded to "PHANTOM-BRAIN" hardened cybersecurity analyst persona.
+   - Added deep domain context: MITRE ATT&CK, CICIDS2017, Nmap/Hydra/hping3, TCP flags.
+   - 7 CRITICAL RULES: GNN>=0.75→ZERO_DAY, GNN>=0.4+ports→PORT_SCAN, NEVER BENIGN if GNN>0.3.
+   - Per-event prompt now includes GNN hint ("CRITICAL/ELEVATED/MODERATE/LOW") + watcher's
+     pre-detected threat type so Gemma never contradicts the rule-engine.
+
+2. decision_engine.py — 3-way GNN/Rule fusion:
+   - Watcher fired + GNN>=0.2 → trust watcher, override Gemma label.
+   - Watcher fired + GNN<0.2 → possible false positive, severity downgraded by 3.
+
+3. network_watcher.py — Alert deduplication:
+   - Cooldown raised 5s→30s: one Hydra run = exactly 1 BRUTE_FORCE alert.
+   - Priority order enforced (DoS>Zero-Day>BruteForce>PortScan): 1 attack=1 alert type.
+   - Whitelisted 172.28.0.5 (Juice Shop victim) and 172.28.0.1 (Docker gateway).
+
+4. frontend/src/components/GNNPanel.jsx — NEW GNN Panel Modal:
+   - Click "GNN + Gemma" in Kill Chain → opens full GNN diagnostic panel.
+   - Live score bar, color-coded status, session stats, per-threat score breakdown (last 5).
+   - Model architecture details: GraphSAGE 3-layer, CICIDS2017, zero-day held-out method.
+   - Role clarity note: GNN detects WHAT is anomalous, Gemma reasons WHY.
+
+5. KillChain.jsx — GNN+Gemma node clickable with INFO badge + footer tip.
+
+6. main.py — gnn_score + attack_pattern added to WebSocket threat broadcast.
+
+7. DashboardContext.jsx — gnn_score + attack_pattern captured in React threat state.
+===============================================================================
