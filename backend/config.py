@@ -31,7 +31,7 @@ WATCHED_PATHS = [
 # Gemma / LLM Config
 GEMMA_MODEL = "gemma4:e4b"
 GEMMA_API_URL = "http://localhost:8085/v1/chat/completions"
-GEMMA_TIMEOUT = 30
+GEMMA_TIMEOUT = 60
 
 # Decision Engine Severity Thresholds
 SEVERITY_THRESHOLDS = {

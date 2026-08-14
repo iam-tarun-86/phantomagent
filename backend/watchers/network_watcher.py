@@ -103,29 +103,27 @@ class NetworkWatcher:
             features = self.feature_extractor.get_features(src_ip)
             
             # Attack Signatures:
-            # 1. PORT_SCAN: Multiple destination ports probed or high SYN rate
-            is_scan = features['unique_dst_ports'] >= 3 or features['syn_count'] >= 5
-            
-            # 2. DOS_ATTACK / HIGH FLOOD: High packet count or high connection frequency
-            is_dos = features['connection_frequency'] >= 15.0 or features['packet_count'] >= 30
-            
-            # 3. BRUTE_FORCE: High HTTP/TCP request volume targeting web/SSH service or failed auths
-            is_bruteforce = features['failed_auth_count'] >= 1 or (features['packet_count'] >= 10 and features['unique_dst_ports'] == 1)
+            # 1. PORT_SCAN: Multiple destination ports probed (unique_dst_ports >= 3)
+            is_scan = features['unique_dst_ports'] >= 3
 
-            # 4. UNKNOWN_ZERO_DAY: High packet burst on non-standard ports or structural anomaly
-            is_zeroday = features['packet_count'] >= 15 and (features['syn_count'] >= 10 or features['unique_dst_ports'] >= 2)
+            # 2. DOS_ATTACK: High volume packet flood targeting 1-2 ports ONLY
+            is_dos = (features['connection_frequency'] >= 25.0 or features['packet_count'] >= 80) and features['unique_dst_ports'] <= 2
 
-            # Priority order: DoS > Zero-Day > Brute Force > Port Scan
-            # Only ONE alert fires per evaluation — highest-priority match wins.
-            # Each type has its own 30s cooldown per source IP.
-            if is_dos and self._can_alert(f"dos_{src_ip}"):
+            # 3. BRUTE_FORCE: Failed authentication or request burst on a single service port
+            is_bruteforce = features['failed_auth_count'] >= 1 or (features['packet_count'] >= 15 and features['unique_dst_ports'] <= 2)
+
+            # 4. UNKNOWN_ZERO_DAY: High anomaly packet burst
+            is_zeroday = features['packet_count'] >= 20 and features['syn_count'] >= 15 and features['unique_dst_ports'] == 2
+
+            # Priority Order: PORT_SCAN (Multi-port recon) takes precedence when unique_dst_ports >= 3
+            if is_scan and self._can_alert(f"scan_{src_ip}"):
+                self._dispatch_alert("PORT_SCAN", 6, src_ip, features, "Real Port scan detected")
+            elif is_dos and self._can_alert(f"dos_{src_ip}"):
                 self._dispatch_alert("DOS_ATTACK", 8, src_ip, features, "Real DoS connection flood detected")
             elif is_zeroday and self._can_alert(f"zeroday_{src_ip}"):
                 self._dispatch_alert("UNKNOWN_ZERO_DAY", 8, src_ip, features, "Un-labeled Zero-Day Structural Anomaly detected")
             elif is_bruteforce and self._can_alert(f"brute_{src_ip}"):
                 self._dispatch_alert("BRUTE_FORCE", 7, src_ip, features, "Real Brute Force / Credential Spraying detected")
-            elif is_scan and self._can_alert(f"scan_{src_ip}"):
-                self._dispatch_alert("PORT_SCAN", 6, src_ip, features, "Real Port scan detected")
 
     def _dispatch_alert(self, threat_type: str, severity: int, src_ip: str, features: Dict, msg: str):
         alert_payload = {

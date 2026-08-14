@@ -29,23 +29,25 @@ CRITICAL RULES — You MUST follow these without exception:
 6. If a rule signature fired (watcher detected the attack type) AND GNN score > 0.2, ALWAYS agree with the watcher.
 7. Low GNN score (< 0.2) with no rule hit = BENIGN. Otherwise escalate appropriately.
 
+IMPORTANT: Output ONLY raw JSON. Keep explanation and reason concise (under 25 words each). Do NOT output reasoning thoughts.
+
 Severity scale:
 - 1-3: Noise / informational (LOG only)
 - 4-6: Low threat (ALERT)
 - 7-8: Active attack (CONTAIN — block source IP, isolate service)
 - 9-10: Critical / destructive (LOCKDOWN — full containment + forensic capture)
 
-Respond ONLY in strict JSON. No markdown, no explanation outside JSON:
+Respond ONLY in strict JSON:
 {
     "threat_type": "PORT_SCAN|DOS_ATTACK|BRUTE_FORCE|SUSPICIOUS_LOGIN|FILE_ANOMALY|UNKNOWN_ZERO_DAY|BENIGN",
     "confidence": 0.0-1.0,
     "severity": 1-10,
-    "attack_pattern": "MITRE ATT&CK technique or attack pattern name",
+    "attack_pattern": "MITRE ATT&CK technique",
     "action": "LOG|ALERT|CONTAIN|LOCKDOWN",
-    "explanation": "one clear executive summary sentence citing GNN score and key features",
-    "reason": "detailed technical reasoning: cite GNN score, specific packet counts, port numbers, frequency values",
-    "indicators": ["indicator 1 with value", "indicator 2 with value", "indicator 3 with value"],
-    "mitigation": "exact Linux iptables/fail2ban command to remediate"
+    "explanation": "one short summary sentence",
+    "reason": "short technical reason citing GNN score and features",
+    "indicators": ["indicator 1", "indicator 2"],
+    "mitigation": "iptables command"
 }"""
 
     def __init__(self, api_url: str = None, model_name: str = None):
@@ -59,34 +61,41 @@ Respond ONLY in strict JSON. No markdown, no explanation outside JSON:
         try:
             async with aiohttp.ClientSession() as session:
                 if self.endpoint_type == "openai":
-                    # Check health or model endpoint for OpenAI compatible server (llama.cpp/vLLM)
-                    health_url = self.api_url.replace("/v1/chat/completions", "/health")
+                    # Check /v1/models endpoint for OpenAI-compatible server (llama.cpp/vLLM/Ollama)
+                    models_url = self.api_url.replace("/v1/chat/completions", "/v1/models")
                     try:
-                        async with session.get(health_url, timeout=3) as resp:
+                        async with session.get(models_url, timeout=5) as resp:
                             if resp.status == 200:
                                 self.is_available = True
-                                print(f"[GEMMA-LLM] Connected to OpenAI-compatible server at {self.api_url}")
+                                print(f"[GEMMA-LLM] Connected to OpenAI-compatible LLM server at {models_url}")
                                 return
                     except Exception:
                         pass
                     
                     # Fallback check on main endpoint
-                    async with session.options(self.api_url, timeout=3) as resp:
-                        self.is_available = True
-                        print(f"[GEMMA-LLM] Connected to LLM server at {self.api_url}")
+                    try:
+                        async with session.options(self.api_url, timeout=3) as resp:
+                            self.is_available = True
+                            print(f"[GEMMA-LLM] Connected to LLM server at {self.api_url}")
+                    except Exception:
+                        self.is_available = False
                 else:
                     url = f"{self.api_url.rstrip('/')}/api/tags"
-                    async with session.get(url, timeout=3) as resp:
+                    async with session.get(url, timeout=5) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             models = [m.get('name') for m in data.get('models', [])]
                             self.is_available = True
                             print(f"[GEMMA-LLM] Connected to Ollama server at {self.api_url}. Models: {models}")
         except Exception as e:
-            print(f"[GEMMA-LLM] Could not connect to LLM server at {self.api_url} ({e}). Using rule-based fallback.")
+            self.is_available = False
+            print(f"[GEMMA-LLM] Could not connect to LLM server at {self.api_url} ({e}). Will retry on inference.")
 
     async def analyze(self, event: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze network event containing feature stats and GNN anomaly score"""
+        if not self.is_available:
+            await self.initialize()
+
         if not self.is_available:
             return self._fallback_analysis(event)
 
@@ -102,7 +111,7 @@ Respond ONLY in strict JSON. No markdown, no explanation outside JSON:
                             {"role": "user", "content": prompt}
                         ],
                         "temperature": 0.1,
-                        "response_format": {"type": "json_object"}
+                        "max_tokens": 1024
                     }
                     async with session.post(self.api_url, json=payload, timeout=aiohttp.ClientTimeout(total=GEMMA_TIMEOUT)) as resp:
                         if resp.status == 200:
@@ -110,6 +119,8 @@ Respond ONLY in strict JSON. No markdown, no explanation outside JSON:
                             choices = data.get('choices', [])
                             response_text = choices[0].get('message', {}).get('content', '{}') if choices else '{}'
                             return self._parse_json_verdict(response_text, event)
+                        else:
+                            print(f"[GEMMA-LLM] HTTP {resp.status} response from LLM server")
                 else:
                     url = f"{self.api_url.rstrip('/')}/api/generate"
                     payload = {
@@ -132,15 +143,65 @@ Respond ONLY in strict JSON. No markdown, no explanation outside JSON:
             return self._fallback_analysis(event)
 
     def _parse_json_verdict(self, response_text: str, event: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse structured JSON verdict from LLM text response"""
+        """Parse structured JSON verdict from LLM text response with robust markdown code-fence extraction"""
         try:
-            analysis = json.loads(response_text)
+            clean_text = response_text.strip()
+            # Extract content between markdown code blocks if present
+            if "```" in clean_text:
+                parts = clean_text.split("```")
+                for part in parts:
+                    part_str = part.strip()
+                    if part_str.startswith("json"):
+                        part_str = part_str[4:].strip()
+                    if part_str.startswith("{") and part_str.endswith("}"):
+                        clean_text = part_str
+                        break
+
+            # Substring extraction for first { to last } or auto-close bracket if truncated
+            start_idx = clean_text.find("{")
+            if start_idx != -1:
+                end_idx = clean_text.rfind("}")
+                if end_idx != -1 and end_idx > start_idx:
+                    clean_text = clean_text[start_idx:end_idx + 1]
+                else:
+                    # Truncated JSON recovery
+                    clean_text = clean_text[start_idx:].rstrip()
+                    if not clean_text.endswith("}"):
+                        clean_text = clean_text + ('"}' if clean_text.endswith('"') else '}')
+
+            analysis = json.loads(clean_text)
+
+            # Robust Confidence parsing
+            raw_conf = analysis.get('confidence', 0.9)
+            if isinstance(raw_conf, str):
+                if 'high' in raw_conf.lower(): conf_val = 0.95
+                elif 'med' in raw_conf.lower(): conf_val = 0.75
+                elif 'low' in raw_conf.lower(): conf_val = 0.40
+                else:
+                    try: conf_val = float(raw_conf.replace('%', '')) / 100.0 if float(raw_conf.replace('%', '')) > 1.0 else float(raw_conf)
+                    except: conf_val = 0.85
+            else:
+                conf_val = float(raw_conf)
+                if conf_val > 1.0: conf_val /= 100.0
+
+            # Robust Severity parsing
+            raw_sev = analysis.get('severity', 6)
+            if isinstance(raw_sev, str):
+                if 'crit' in raw_sev.lower() or 'high' in raw_sev.lower(): sev_val = 8
+                elif 'med' in raw_sev.lower(): sev_val = 6
+                elif 'low' in raw_sev.lower(): sev_val = 3
+                else:
+                    try: sev_val = int(raw_sev)
+                    except: sev_val = 6
+            else:
+                sev_val = int(raw_sev)
+
             return {
                 "threat_type": analysis.get('threat_type', 'UNKNOWN'),
-                "confidence": float(analysis.get('confidence', 0.85)),
-                "severity": int(analysis.get('severity', 5)),
+                "confidence": round(conf_val, 2),
+                "severity": max(1, min(10, sev_val)),
                 "attack_pattern": analysis.get('attack_pattern', 'Detected network anomaly'),
-                "action": analysis.get('action', 'ALERT'),
+                "action": analysis.get('action', 'CONTAIN' if sev_val >= 6 else 'ALERT'),
                 "explanation": analysis.get('explanation', 'Network anomaly detected'),
                 "reason": analysis.get('reason', f"GNN Anomaly score {event.get('gnn_score', 0.0)} flagged suspicious features."),
                 "indicators": analysis.get('indicators', [f"Source IP {event.get('source_ip', 'unknown')}"]),
@@ -148,8 +209,8 @@ Respond ONLY in strict JSON. No markdown, no explanation outside JSON:
                 "source": "GEMMA_LLM",
                 "ai_confidence": "HIGH"
             }
-        except json.JSONDecodeError:
-            print(f"[GEMMA-LLM] JSON decoding error: {response_text}")
+        except Exception as e:
+            print(f"[GEMMA-LLM] JSON decoding exception ({e}): raw text = {response_text[:100]}...")
             return self._fallback_analysis(event)
 
     def _build_prompt(self, event: Dict[str, Any]) -> str:

@@ -355,3 +355,27 @@ Verification Completed:
   * Tier 4 (CAMPAIGN): Sev 9 -> Action LOCKDOWN
 - Clean production React build (`npm run build`) passed in 386ms.
 ===============================================================================
+
+-------------------------------------------------------------------------------
+PHASE 13 — Port Scan Misclassification Fix & Gemma LLM Inference Integration
+-------------------------------------------------------------------------------
+Problems Solved:
+1. Issue 1: Port Scan was being misclassified as DoS Attack.
+   Root Cause: In `network_watcher.py`, `is_dos` check was placed before `is_scan` and flagged `DOS_ATTACK` whenever `packet_count >= 30` without checking `unique_dst_ports <= 2`. An Nmap scan probing 30 ports (`unique_dst_ports = 30`, `packet_count = 30`) was hitting `is_dos` first!
+   Fix: Port scan signature (`unique_dst_ports >= 3`) is now checked FIRST in `network_watcher.py`. `is_dos` is strictly restricted to high volume floods targeting 1-2 ports ONLY (`unique_dst_ports <= 2`).
+
+2. Issue 2: Gemma LLM was falling back to rule-based analysis and not receiving inputs.
+   Root Cause:
+   a) `gemma_engine.py` health check sent GET requests to `/health` or OPTIONS on `/v1/chat/completions`, which `llama.cpp` on port 8085 rejected with 404, setting `is_available = False` permanently at startup.
+   b) `GEMMA_TIMEOUT` was 30s, causing Gemma 4 chain-of-thought generation to time out.
+   c) `max_tokens` was set to 512, truncating the JSON output mid-response and throwing a JSONDecodeError.
+   Fix:
+   a) `gemma_engine.py` now queries `/v1/models` (official OpenAI models endpoint supported by `llama.cpp`).
+   b) Added automatic reconnect retry on inference if initial startup check failed.
+   c) Raised `GEMMA_TIMEOUT` from 30s to 60s in `config.py`.
+   d) Raised `max_tokens` to 1024, instructed concise output without thinking blocks, and added truncated JSON string recovery.
+
+Verification Completed:
+- Tested Gemma LLM connection live: `Is available: True`, `source: "GEMMA_LLM"`.
+- Verified live inference output returning structured JSON verdict for `PORT_SCAN`.
+===============================================================================
