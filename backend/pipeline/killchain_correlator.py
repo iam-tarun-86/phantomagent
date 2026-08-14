@@ -15,7 +15,7 @@ Advancing through >= 2 stages indicates a coordinated APT campaign.
 
 import time
 from collections import defaultdict
-from typing import Dict, Any, Set, List
+from typing import Dict, Any, Set, List, Tuple
 
 
 STAGE_MAPPING = {
@@ -43,13 +43,14 @@ class KillChainCorrelator:
         now = time.time()
         cutoff = now - self.window_seconds
 
-        stage = STAGE_MAPPING.get(threat_type.upper(), 1)
-
         # Prune old events outside window
         self.history[src_ip] = [item for item in self.history[src_ip] if item[0] >= cutoff]
 
-        # Append current event
-        self.history[src_ip].append((now, threat_type, stage))
+        # Only append actual threat events (ignore BENIGN / UNKNOWN noise)
+        threat_upper = threat_type.upper()
+        if threat_upper in STAGE_MAPPING and threat_upper not in ('BENIGN', 'UNKNOWN', 'NOISE'):
+            stage = STAGE_MAPPING[threat_upper]
+            self.history[src_ip].append((now, threat_type, stage))
 
         # Extract unique stages observed in window
         observed_stages: Set[int] = {item[2] for item in self.history[src_ip]}

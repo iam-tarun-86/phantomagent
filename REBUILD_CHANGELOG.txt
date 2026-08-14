@@ -294,3 +294,27 @@ What We Added:
 Verification:
 - Clean production build (`npm run build`) passed with zero errors.
 ===============================================================================
+
+-------------------------------------------------------------------------------
+PHASE 11 — Comprehensive System Audit, Code Verification & Loophole Fixes
+-------------------------------------------------------------------------------
+System Audit & Loophole Fixes:
+1. `backend/pipeline/killchain_correlator.py`:
+   - Fixed missing `Tuple` import in typing annotations.
+   - Filtered out benign/unknown noise events (`BENIGN`, `NOISE`, `UNKNOWN`) from being
+     recorded into the attack campaign timeline to prevent false multi-stage campaign escalation.
+
+2. `backend/main.py`:
+   - Fixed severity override loophole: Prevents watcher default severity (e.g. 7 or 8) from
+     overriding Consensus Gate's false-positive suppression decision when `has_consensus` is False.
+   - Severity override now strictly restricted to explicit API test injections or high-consensus events.
+
+3. `start.sh`:
+   - Added automatic `chmod -R 777 data/` to ensure SQLite and JSONL dataset sinks remain writeable
+     across both normal user and sudo process executions.
+
+Verification Completed:
+- Ran automated test suite evaluating both benign traffic suppression (<3 votes -> Sev 2)
+  and attack event escalation (3/5 votes -> Sev 7).
+- Confirmed zero permission errors and clean execution.
+===============================================================================

@@ -40,6 +40,7 @@ fi
 # ─────────────────────────────────────────
 echo "[2/4] Initializing storage directories..."
 mkdir -p data backend/models
+chmod -R 777 data/ 2>/dev/null || true
 
 if [ ! -f "backend/models/gnn_cicids2017.pt" ]; then
     echo "      GNN weights not found — training model..."

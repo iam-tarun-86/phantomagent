@@ -96,8 +96,10 @@ class DashboardState:
         
         await self.broadcast_pipeline(3, filtered)
         
-        # Preserve test event severity if higher than AI's analysis
-        if event.get('severity', 0) > analysis.get('severity', 0):
+        # Preserve test event severity ONLY for explicit API test injections or high-consensus events.
+        # If Consensus Gate suppressed a false positive, do NOT allow watcher default severity to override it.
+        is_test_injection = event.get('source') in ('TEST_API', 'API', 'SIMULATION') or 'inject' in event.get('message', '').lower()
+        if (is_test_injection or analysis.get('has_consensus', False)) and event.get('severity', 0) > analysis.get('severity', 0):
             analysis['severity'] = event['severity']
             if event.get('reason'):
                 analysis['reason'] = event['reason']
