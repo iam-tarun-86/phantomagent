@@ -6,11 +6,13 @@ import ThreatFeed from './components/ThreatFeed'
 import AttackMap from './components/AttackMap'
 import KillChain from './components/KillChain'
 import TerminalStream from './components/TerminalStream'
-import LiveConnections from './components/LiveConnections'  // NEW IMPORT
+import LiveConnections from './components/LiveConnections'
 import RedAlertModal from './components/RedAlertModal'
+import ThreatDetailModal from './components/ThreatDetailModal'
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [selectedThreat, setSelectedThreat] = useState(null)
   const { alert, approveThreat, dismissThreat, isConnected } = useDashboard()
 
   if (!isAuthenticated) {
@@ -31,22 +33,35 @@ function App() {
 
       <div className="px-4 py-4 h-[calc(100vh-4rem)] flex flex-col gap-4">
         <div className="flex-1 flex gap-4 min-h-0">
-          <div className="w-[22%] min-w-[260px]"><ThreatFeed /></div>
+          <div className="w-[22%] min-w-[260px]">
+            <ThreatFeed onSelectThreat={(threat) => setSelectedThreat(threat)} />
+          </div>
           <div className="flex-1 min-w-0"><AttackMap /></div>
           <div className="w-[18%] min-w-[200px] flex flex-col gap-3">
             <KillChain />
-            <LiveConnections />  {/* NEW: Live Connections Panel */}
+            <LiveConnections />
           </div>
         </div>
         <div className="h-[22%] min-h-[180px]"><TerminalStream /></div>
       </div>
 
+      {/* Red Alert Modal for Critical Approval */}
       <RedAlertModal
         isOpen={!!alert}
         threat={alert}
         onApprove={() => alert && approveThreat(alert.threat_id)}
         onDismiss={() => alert && dismissThreat(alert.threat_id)}
       />
+
+      {/* Interactive Threat Detail & Evidence Inspector Modal */}
+      {selectedThreat && (
+        <ThreatDetailModal
+          threat={selectedThreat}
+          onClose={() => setSelectedThreat(null)}
+          onApprove={() => selectedThreat && approveThreat(selectedThreat.id)}
+          onDismiss={() => selectedThreat && dismissThreat(selectedThreat.id)}
+        />
+      )}
     </div>
   )
 }

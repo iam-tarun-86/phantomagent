@@ -49,34 +49,57 @@ class DecisionEngine:
         analysis['consensus_votes'] = consensus_res['total_votes']
         analysis['has_consensus'] = consensus_res['has_consensus']
 
-        # 4. FUSION & CONSENSUS FILTER:
-        # If 3-of-5 signals agree OR watcher confirmed signature + GNN >= 0.2, escalate.
-        # If consensus fails (< 3 votes) and no strong rule match, downgrade severity to prevent False Positives.
-        gemma_label = analysis.get('threat_type', 'UNKNOWN')
+        # 4. EXPLAINABLE 4-TIER SEVERITY MATRIX CALCULATOR
+        # Formula: Severity = BaseSeverity + Consensus_Bonus + Campaign_Bonus
+        BASE_SEVERITIES = {
+            'PORT_SCAN': 6,
+            'BRUTE_FORCE': 7,
+            'DOS_ATTACK': 8,
+            'UNKNOWN_ZERO_DAY': 8,
+            'FILE_ANOMALY': 7,
+            'SUSPICIOUS_LOGIN': 6,
+            'BENIGN': 2,
+            'UNKNOWN': 3
+        }
+
+        target_type = rule_threat_type if rule_threat_type not in ('UNKNOWN', 'BENIGN') else analysis.get('threat_type', 'UNKNOWN')
+        base_sev = BASE_SEVERITIES.get(target_type, 4)
+
+        consensus_bonus = 1 if consensus_res['has_consensus'] else -3
+        campaign_bonus = 1 if consensus_res.get('killchain', {}).get('is_campaign', False) else 0
+
+        final_severity = max(1, min(10, base_sev + consensus_bonus + campaign_bonus))
+
+        severity_breakdown = {
+            "base_severity": base_sev,
+            "consensus_modifier": consensus_bonus,
+            "campaign_modifier": campaign_bonus,
+            "final_severity": final_severity,
+            "threat_type": target_type,
+            "has_consensus": consensus_res['has_consensus'],
+            "total_votes": consensus_res['total_votes']
+        }
+
+        analysis['threat_type'] = target_type
+        analysis['severity'] = final_severity
+        analysis['severity_breakdown'] = severity_breakdown
 
         if consensus_res['has_consensus']:
-            if rule_threat_type not in ('UNKNOWN', 'BENIGN'):
-                analysis['threat_type'] = rule_threat_type
-                analysis['severity'] = max(analysis.get('severity', 5), rule_severity)
             analysis['explanation'] = (
                 f"Consensus Passed ({consensus_res['total_votes']}/5 signals agreed). "
-                f"Confirmed {analysis['threat_type']} (GNN: {gnn_score:.4f})."
+                f"Confirmed {target_type} (GNN: {gnn_score:.4f}, Sev: {final_severity})."
             )
         else:
-            # Consensus failed (<3 votes) -> Downgrade severity to avoid alert noise / false positive
-            if rule_threat_type not in ('UNKNOWN', 'BENIGN') and gnn_score >= 0.2:
-                analysis['threat_type'] = rule_threat_type
-                analysis['severity'] = min(6, rule_severity)  # Cap at moderate severity
-                analysis['explanation'] = (
-                    f"Rule signature match ({rule_threat_type}) but Consensus Gate returned "
-                    f"{consensus_res['total_votes']}/5 votes. Moderate threat classification."
-                )
-            else:
-                analysis['severity'] = min(analysis.get('severity', 2), 3)  # Downgrade to LOG level
+            if final_severity <= 3:
                 analysis['action'] = 'LOG'
                 analysis['explanation'] = (
                     f"Consensus Gate failed ({consensus_res['total_votes']}/5 signals). "
-                    f"Suppressed potential false positive."
+                    f"Suppressed potential false positive (Sev: {final_severity})."
+                )
+            else:
+                analysis['explanation'] = (
+                    f"Rule signature hit ({target_type}) but Consensus Gate gave "
+                    f"{consensus_res['total_votes']}/5 votes. Moderate classification (Sev: {final_severity})."
                 )
 
         # 5. Route decision by fused severity
@@ -95,7 +118,8 @@ class DecisionEngine:
             'analysis': analysis,
             'decision': decision,
             'gnn_score': gnn_score,
-            'consensus': consensus_res
+            'consensus': consensus_res,
+            'severity_breakdown': severity_breakdown
         }
 
     
@@ -107,8 +131,18 @@ class DecisionEngine:
         severity = analysis.get('severity', 5)
         action = analysis.get('action', 'ALERT')
         
-        # Route by severity
-        if SEVERITY_THRESHOLDS['AUTO_CONTAIN'][0] <= severity <= SEVERITY_THRESHOLDS['AUTO_CONTAIN'][1]:
+        # Route by 4-tier severity matrix
+        log_range = SEVERITY_THRESHOLDS.get('LOG', (1, 3))
+        if log_range[0] <= severity <= log_range[1]:
+            self.stats['logged'] += 1
+            return {
+                'action': 'LOG',
+                'requires_approval': False,
+                'auto_execute': False,
+                'reason': f'Severity {severity}: Suppressed noise / log only'
+            }
+
+        elif SEVERITY_THRESHOLDS['AUTO_CONTAIN'][0] <= severity <= SEVERITY_THRESHOLDS['AUTO_CONTAIN'][1]:
             self.stats['auto_contained'] += 1
             return {
                 'action': 'CONTAIN',

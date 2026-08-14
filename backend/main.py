@@ -186,6 +186,7 @@ class DashboardState:
         threat_dict['attack_pattern'] = analysis.get('attack_pattern', '')  # MITRE pattern label
         threat_dict['consensus_votes'] = analysis.get('consensus_votes', 0)
         threat_dict['has_consensus'] = analysis.get('has_consensus', False)
+        threat_dict['severity_breakdown'] = analysis.get('severity_breakdown', {})
 
         # SAVE TO DATABASE
         db.save_threat(threat_dict)

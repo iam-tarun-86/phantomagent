@@ -318,3 +318,40 @@ Verification Completed:
   and attack event escalation (3/5 votes -> Sev 7).
 - Confirmed zero permission errors and clean execution.
 ===============================================================================
+
+-------------------------------------------------------------------------------
+PHASE 12 — Standardized 4-Tier Severity Model & Threat Detail Inspector UI
+-------------------------------------------------------------------------------
+What We Added:
+1. `backend/config.py`:
+   - Re-aligned `SEVERITY_THRESHOLDS` for explicit 4-tier routing:
+     * Tier 1 (1-3: LOG) -> Informational / noise suppressed
+     * Tier 2 & 3 (4-8: AUTO_CONTAIN) -> Moderate / High threats auto-contained
+     * Tier 4 (9-10: PENDING_APPROVAL) -> Critical / Campaign approval modal
+
+2. `backend/pipeline/decision_engine.py`:
+   - Standardized mathematical 4-tier severity formula:
+     Severity = BaseSeverity(ThreatType) + Consensus_Modifier + Campaign_Modifier
+   - Attached `severity_breakdown` dict (`base_severity`, `consensus_modifier`, `campaign_modifier`, `final_severity`)
+     to verdict object.
+   - Updated `decide()` method to handle Tier 1 (1-3) `LOG` actions without defaulting to ALERT.
+
+3. `backend/main.py`:
+   - Included `severity_breakdown` in WebSocket threat payloads.
+
+4. `frontend/src/components/ThreatDetailModal.jsx`:
+   - Created interactive Threat Detail & Evidence Inspector Modal.
+   - Shows explainable severity score attribution breakdown (Base + Consensus + Campaign),
+     5-signal consensus matrix state, live packet telemetry, Gemma LLM reasoning, and `iptables` command.
+
+5. `frontend/src/components/ThreatFeed.jsx` & `frontend/src/App.jsx`:
+   - Added threat filter tabs (`ALL`, `CRITICAL`, `CONTAINED`).
+   - Wired threat card click handler to trigger `ThreatDetailModal`.
+
+Verification Completed:
+- Automated python test script verified all 4 severity tiers:
+  * Tier 1 (BENIGN): Sev 1 -> Action LOG
+  * Tier 3 (PORT SCAN): Sev 7 -> Action CONTAIN
+  * Tier 4 (CAMPAIGN): Sev 9 -> Action LOCKDOWN
+- Clean production React build (`npm run build`) passed in 386ms.
+===============================================================================

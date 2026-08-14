@@ -33,10 +33,11 @@ GEMMA_MODEL = "gemma4:e4b"
 GEMMA_API_URL = "http://localhost:8085/v1/chat/completions"
 GEMMA_TIMEOUT = 30
 
-# Decision Engine
+# Decision Engine Severity Thresholds
 SEVERITY_THRESHOLDS = {
-    "AUTO_CONTAIN": (1, 7),
-    "PENDING_APPROVAL": (8, 10),
+    "LOG": (1, 3),              # Tier 1: Informational / Noise -> Log only
+    "AUTO_CONTAIN": (4, 8),     # Tier 2 & 3: Moderate / High -> Auto-containment
+    "PENDING_APPROVAL": (9, 10),# Tier 4: Critical / Campaign -> Operator Approval Modal
 }
 
 # Responder
