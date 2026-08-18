@@ -66,9 +66,9 @@ run_bruteforce() {
 
 run_zeroday() {
     echo -e "\n[ATTACK 3/3] Executing Un-labeled Zero-Day Structural Anomaly against ${TARGET_IP}..."
-    # hping3 flood: high-frequency TCP SYN burst on single port (simulates infiltration pattern)
-    docker exec ${KALI_CONTAINER} bash -c "hping3 -S --flood --rand-source -p 3000 -c 200 ${TARGET_IP} 2>/dev/null" || \
-    docker exec ${KALI_CONTAINER} bash -c "for i in \$(seq 1 50); do curl -s -o /dev/null http://${TARGET_IP}:3000/ 2>/dev/null; done"
+    # hping3 flood: send a 2-second high-frequency TCP SYN burst on port 3000 with timeout so it doesn't hang
+    docker exec ${KALI_CONTAINER} bash -c "timeout 2s hping3 -S --flood -p 3000 ${TARGET_IP} 2>/dev/null || true"
+    docker exec ${KALI_CONTAINER} bash -c "for i in \$(seq 1 40); do curl -s -o /dev/null -m 0.2 http://${TARGET_IP}:3000/ 2>/dev/null; done"
     echo "✔ Zero-day anomaly burst completed. Watch React Dashboard for UNKNOWN_ZERO_DAY alert (GNN Score > 0.75)."
 }
 
