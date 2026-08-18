@@ -88,6 +88,28 @@ Required JSON Schema:
             
             async with aiohttp.ClientSession() as session:
                 if self.endpoint_type == "openai":
+                    schema_def = {
+                        "type": "object",
+                        "properties": {
+                            "anomaly_detected": {"type": "boolean"},
+                            "confidence": {"type": "number"},
+                            "mitre_technique": {"type": "string"},
+                            "kill_chain_stage": {"type": "string"},
+                            "justification": {"type": "string"},
+                            "active_defense_actions": {
+                                "type": "array",
+                                "items": {"type": "string"}
+                            }
+                        },
+                        "required": [
+                            "anomaly_detected",
+                            "confidence",
+                            "mitre_technique",
+                            "kill_chain_stage",
+                            "justification",
+                            "active_defense_actions"
+                        ]
+                    }
                     payload = {
                         "model": self.model_name,
                         "messages": [
@@ -96,8 +118,16 @@ Required JSON Schema:
                         ],
                         "temperature": 0.0,
                         "top_p": 1.0,
-                        "max_tokens": 300,
-                        "response_format": {"type": "json_object"}
+                        "max_tokens": 2048,
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": "threat_analysis",
+                                "strict": True,
+                                "schema": schema_def
+                            },
+                            "schema": schema_def
+                        }
                     }
                     async with session.post(self.api_url, json=payload, timeout=aiohttp.ClientTimeout(total=GEMMA_TIMEOUT)) as resp:
                         if resp.status == 200:
@@ -106,6 +136,15 @@ Required JSON Schema:
                             response_text = choices[0].get('message', {}).get('content', '{}') if choices else '{}'
                             return self._parse_json_verdict(response_text, event)
                         else:
+                            # If server rejects json_schema wrapper, retry with json_object
+                            if resp.status == 400:
+                                payload["response_format"] = {"type": "json_object"}
+                                async with session.post(self.api_url, json=payload, timeout=aiohttp.ClientTimeout(total=GEMMA_TIMEOUT)) as retry_resp:
+                                    if retry_resp.status == 200:
+                                        data = await retry_resp.json()
+                                        choices = data.get('choices', [])
+                                        response_text = choices[0].get('message', {}).get('content', '{}') if choices else '{}'
+                                        return self._parse_json_verdict(response_text, event)
                             print(f"[GEMMA-LLM] HTTP {resp.status} response from LLM server")
                 else:
                     url = f"{self.api_url.rstrip('/')}/api/generate"
@@ -114,7 +153,7 @@ Required JSON Schema:
                         "prompt": f"{self.SYSTEM_PROMPT}\n\n{prompt}",
                         "format": "json",
                         "stream": False,
-                        "options": {"temperature": 0.0, "top_p": 1.0}
+                        "options": {"temperature": 0.0, "top_p": 1.0, "num_predict": 2048}
                     }
                     async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=GEMMA_TIMEOUT)) as resp:
                         if resp.status == 200:
@@ -129,7 +168,7 @@ Required JSON Schema:
             return self._fallback_analysis(event)
 
     def _parse_json_verdict(self, response_text: str, event: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse structured JSON verdict conforming strictly to schema with deterministic fallback mapping"""
+        """Parse structured JSON verdict with robust multi-layer exception handling & fallback"""
         src_ip = event.get('source_ip', 'unknown')
         try:
             clean_text = response_text.strip()

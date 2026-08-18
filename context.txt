@@ -402,7 +402,34 @@ Problems Solved:
    - Updated `_parse_json_verdict` parser to cleanly map fields to downstream `Threat` models,
      `DecisionEngine`, `Responder`, and the React SOC dashboard.
 
-Verification Completed:
-- Verified end-to-end event analysis and fallback schema mapping with zero JSON decode exceptions.
 ===============================================================================
+
+-------------------------------------------------------------------------------
+PHASE 15 — Production Hardening: 2048 Tokens, Strict JSON Schema & Command Whitelisting
+-------------------------------------------------------------------------------
+Problems Solved:
+1. Max Token Expansion:
+   - Raised LLM generation limit from 300 to `max_tokens: 2048` in `backend/pipeline/gemma_engine.py`
+     to provide ample headroom for complex, detailed forensic justifications.
+
+2. Strict Token-Level JSON Schema Enforcement:
+   - Upgraded API payload `response_format` to `"type": "json_schema"` passing the explicit
+     schema definition to lock key names at the GBNF decoder level.
+   - Added automatic fallback to `json_object` in case of older server versions.
+
+3. Exception-Proof JSON Parsing:
+   - Hardened `_parse_json_verdict()` with multi-layered bracket repair, `json.JSONDecodeError`
+     catching, and fallback threat mapping so the pipeline never crashes.
+
+4. Command Whitelisting & Prompt Injection Defense (CWE-78):
+   - Hardened `backend/pipeline/responder.py` with:
+     * `ipaddress.ip_address` IP validation against arbitrary strings.
+     * Strict command allowlist: `iptables`, `sudo iptables`, `fail2ban-client`, `docker stop`.
+     * Rejection of all shell metacharacters (`;`, `&&`, `||`, `|`, `` ` ``, `$()`, `>`, `<`).
+     * Direct parameter list execution with `check=False` (no `shell=True`).
+
+Verification Completed:
+- Live E2E test confirmed PORT_SCAN and DOS_ATTACK reasoning generated flawlessly with zero errors.
+===============================================================================
+
 
