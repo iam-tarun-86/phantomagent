@@ -60,7 +60,7 @@ class DashboardState:
     
     async def add_log(self, source: str, level: str, message: str):
         log_entry = {
-            "timestamp": datetime.now().strftime("%H:%M:%S"),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "source": source,
             "level": level,
             "message": message
@@ -372,6 +372,38 @@ async def delete_all_logs():
     state.threats = []
     await state.broadcast({"type": "clear_logs"})
     return {"status": "cleared"}
+
+
+@app.post("/api/threats/approve-all")
+async def approve_all_threats():
+    print(f"[HTTP] APPROVE ALL received. Pending count: {len(state.pending_approvals)}")
+    pending_ids = list(state.pending_approvals.keys())
+    results = []
+    
+    for threat_id in pending_ids:
+        if threat_id in state.processing_actions:
+            continue
+        state.processing_actions.add(threat_id)
+        try:
+            if threat_id in state.pending_approvals:
+                pending = state.pending_approvals.pop(threat_id)
+                result = await state.responder.execute('LOCKDOWN', pending['threat'])
+                await state.add_log("RESPONSE", "INFO", f"APPROVED ALL → {threat_id} ({', '.join(result['actions_taken'])})")
+                state.telemetry['threats_blocked'] += 1
+                
+                await state.broadcast({
+                    "type": "contained",
+                    "data": {
+                        "threat_id": threat_id,
+                        "actions": result['actions_taken'],
+                        "report": result.get('forensic_report')
+                    }
+                })
+                results.append({"threat_id": threat_id, "status": "CONTAINED"})
+        finally:
+            state.processing_actions.discard(threat_id)
+            
+    return {"status": "ALL_CONTAINED", "count": len(results)}
 
 
 @app.post("/api/threats/{threat_id}/approve")

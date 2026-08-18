@@ -33,6 +33,19 @@ const FullscreenLogViewer = ({ isOpen, onClose }) => {
         }
     }
 
+    // Global ESC key listener to close fullscreen logs
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                onClose?.()
+            }
+        }
+        if (isOpen) {
+            window.addEventListener('keydown', handleKeyDown)
+        }
+        return () => window.removeEventListener('keydown', handleKeyDown)
+    }, [isOpen, onClose])
+
     // Fetch all historical logs from database when opened
     useEffect(() => {
         if (isOpen) {
@@ -104,8 +117,8 @@ const FullscreenLogViewer = ({ isOpen, onClose }) => {
                     <div className="overflow-auto h-[calc(100vh-80px)] p-6">
                         <div className="min-w-[800px]">
                             {/* Table Header */}
-                            <div className="grid grid-cols-[100px_120px_80px_1fr] gap-4 px-4 py-2 text-[10px] font-mono text-data-white/30 uppercase tracking-wider border-b border-panel-border sticky top-0 bg-deep-space/98 z-10">
-                                <span>Time</span>
+                            <div className="grid grid-cols-[170px_130px_90px_1fr] gap-4 px-4 py-2 text-[10px] font-mono text-data-white/30 uppercase tracking-wider border-b border-panel-border sticky top-0 bg-deep-space/98 z-10">
+                                <span>Date & Time</span>
                                 <span>Source</span>
                                 <span>Level</span>
                                 <span>Message</span>
@@ -119,10 +132,10 @@ const FullscreenLogViewer = ({ isOpen, onClose }) => {
                                         initial={{ opacity: 0, x: -10 }}
                                         animate={{ opacity: 1, x: 0 }}
                                         transition={{ delay: index * 0.01 }}
-                                        className="grid grid-cols-[100px_120px_80px_1fr] gap-4 px-4 py-2.5 rounded hover:bg-panel-border/20 transition-colors font-mono text-xs border-l-2 border-transparent hover:border-l-neon-cyan/30"
+                                        className="grid grid-cols-[170px_130px_90px_1fr] gap-4 px-4 py-2.5 rounded hover:bg-panel-border/20 transition-colors font-mono text-xs border-l-2 border-transparent hover:border-l-neon-cyan/30"
                                     >
-                                        <span className="text-data-white/40 flex items-center gap-1.5">
-                                            <Clock size={10} />
+                                        <span className="text-data-white/50 flex items-center gap-1.5 whitespace-nowrap">
+                                            <Clock size={10} className="shrink-0" />
                                             {log.timestamp}
                                         </span>
                                         <span className="text-data-white/60 truncate">

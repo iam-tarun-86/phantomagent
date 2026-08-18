@@ -1,9 +1,20 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ShieldAlert, ShieldCheck, X, Terminal, Brain, Activity, CheckCircle, AlertTriangle, Layers, Lock } from 'lucide-react'
 
 const ThreatDetailModal = ({ threat, onClose, onApprove, onDismiss }) => {
   if (!threat) return null
+
+  // Global ESC key listener to close modal
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        onClose?.()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
 
   const sb = threat.severity_breakdown || {}
   const baseSev = sb.base_severity ?? (threat.severity >= 7 ? threat.severity - 1 : threat.severity)

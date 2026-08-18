@@ -428,8 +428,40 @@ Problems Solved:
      * Rejection of all shell metacharacters (`;`, `&&`, `||`, `|`, `` ` ``, `$()`, `>`, `<`).
      * Direct parameter list execution with `check=False` (no `shell=True`).
 
-Verification Completed:
-- Live E2E test confirmed PORT_SCAN and DOS_ATTACK reasoning generated flawlessly with zero errors.
 ===============================================================================
+
+-------------------------------------------------------------------------------
+PHASE 16 — GNN Historical Inspector, Date+Time in Logs, Multi-Threat Queue & ESC Navigation
+-------------------------------------------------------------------------------
+Problems Solved:
+1. GNN History Inspection:
+   - Updated `frontend/src/components/GNNPanel.jsx` with an interactive historical switcher tab bar.
+   - Operators can now toggle between previous attack incidents (e.g. DoS, Brute Force, Port Scan)
+     and inspect each past event's GNN structural score, 5-signal consensus matrix votes, and features.
+
+2. Responsive GNN Modal Layout:
+   - Constrained GNN modal to `max-h-[88vh]` with internal smooth scrolling (`overflow-y-auto terminal-scroll`)
+     preventing content cutoff on all display resolutions.
+
+3. Date + Time in System Logs:
+   - Updated `backend/main.py` to record full calendar timestamps: `YYYY-MM-DD HH:MM:SS`.
+   - Updated `FullscreenLogViewer.jsx` column to "Date & Time" (170px width) with clock icons.
+   - Updated `TerminalStream.jsx` stream entries to show complete attack dates and times.
+
+4. Multi-Threat Containment Queue in RedAlertModal:
+   - Updated `frontend/src/components/RedAlertModal.jsx` to support multi-threat queue switcher pills
+     when rapid attack bursts trigger multiple concurrent critical threats.
+   - Added a single-click "CONTAIN ALL (N)" button alongside the single-threat approval button.
+   - Added backend `/api/threats/approve-all` endpoint in `backend/main.py`.
+
+5. Global Keyboard Accessibility:
+   - Added `Esc` key listener to `GNNPanel.jsx`, `FullscreenLogViewer.jsx`, and `ThreatDetailModal.jsx`.
+   - Explicitly preserved protection on `RedAlertModal` to prevent accidental dismissal during attacks.
+
+Verification Completed:
+- Production frontend build (`npm run build`) passed in 2.53s with 0 errors.
+- Verified backend endpoints, timestamp formats, and modal responsiveness.
+===============================================================================
+
 
 
