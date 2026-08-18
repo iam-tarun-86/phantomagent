@@ -162,19 +162,36 @@ const ThreatDetailModal = ({ threat, onClose, onApprove, onDismiss }) => {
 
           {/* Footer Actions */}
           <div className="flex items-center justify-between px-6 py-4 border-t border-panel-border bg-panel-base/60">
-            <button
-              onClick={() => { onDismiss?.(); onClose(); }}
-              className="px-4 py-2 rounded-lg border border-panel-border bg-panel-base text-xs font-mono font-bold text-data-white/60 hover:text-data-white hover:border-data-white/30 transition-colors"
-            >
-              DISMISS THREAT
-            </button>
-            <button
-              onClick={() => { onApprove?.(); onClose(); }}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-contain-green text-black text-xs font-mono font-bold hover:bg-contain-green/90 transition-colors shadow-lg shadow-contain-green/20"
-            >
-              <Lock size={14} />
-              EXECUTE CONTAINMENT
-            </button>
+            {['CONTAINED', 'AUTO_CONTAINED'].includes(threat.status) ? (
+              <div className="w-full flex items-center justify-between">
+                <div className="flex items-center gap-2 text-contain-green">
+                  <CheckCircle size={16} />
+                  <span className="text-xs font-mono font-bold tracking-wider">THREAT SECURELY CONTAINED</span>
+                </div>
+                <button
+                  onClick={onClose}
+                  className="px-6 py-2 rounded-lg border border-panel-border bg-panel-base text-xs font-mono font-bold text-data-white/60 hover:text-data-white hover:border-data-white/30 transition-colors"
+                >
+                  CLOSE
+                </button>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => { onDismiss?.(); onClose(); }}
+                  className="px-4 py-2 rounded-lg border border-panel-border bg-panel-base text-xs font-mono font-bold text-data-white/60 hover:text-data-white hover:border-data-white/30 transition-colors"
+                >
+                  DISMISS THREAT
+                </button>
+                <button
+                  onClick={() => { onApprove?.(); onClose(); }}
+                  className="flex items-center gap-2 px-5 py-2 rounded-lg bg-contain-green text-black text-xs font-mono font-bold hover:bg-contain-green/90 transition-colors shadow-lg shadow-contain-green/20"
+                >
+                  <Lock size={14} />
+                  EXECUTE CONTAINMENT
+                </button>
+              </>
+            )}
           </div>
         </motion.div>
       </motion.div>

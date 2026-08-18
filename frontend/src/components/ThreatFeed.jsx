@@ -72,7 +72,7 @@ const ThreatCard = ({ threat, onClick }) => {
                 </div>
             )}
 
-            {threat.status === 'CONTAINED' && (
+            {['CONTAINED', 'AUTO_CONTAINED'].includes(threat.status) && (
                 <div className="mt-2 flex items-center gap-1.5">
                     <div className="w-1.5 h-1.5 rounded-full bg-contain-green" />
                     <span className="text-[9px] font-mono text-contain-green font-bold tracking-wider">CONTAINED</span>
@@ -110,7 +110,7 @@ const ThreatFeed = ({ onSelectThreat }) => {
 
     const filteredThreats = threats.filter(t => {
         if (filter === 'CRITICAL') return t.severity >= 8
-        if (filter === 'CONTAINED') return t.status === 'CONTAINED'
+        if (filter === 'CONTAINED') return ['CONTAINED', 'AUTO_CONTAINED'].includes(t.status)
         return true
     })
 
@@ -148,7 +148,7 @@ const ThreatFeed = ({ onSelectThreat }) => {
                         {f} ({
                             f === 'ALL' ? threats.length :
                             f === 'CRITICAL' ? threats.filter(t => t.severity >= 8).length :
-                            threats.filter(t => t.status === 'CONTAINED').length
+                            f === 'CONTAINED' ? threats.filter(t => ['CONTAINED', 'AUTO_CONTAINED'].includes(t.status)).length : 0
                         })
                     </button>
                 ))}
