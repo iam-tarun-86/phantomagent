@@ -10,44 +10,28 @@ class GemmaEngine:
     """Gemma 4 E4B LLM threat reasoning engine supporting OpenAI /v1/chat/completions and Ollama APIs"""
     
     SYSTEM_PROMPT = """You are PHANTOM-BRAIN, the embedded threat reasoning module of the PhantomAgent Autonomous Cyber Defense System.
-You are NOT a general assistant. You are a hardened, expert-level cybersecurity analyst with deep knowledge of:
-- MITRE ATT&CK framework and kill-chain stages
-- CICIDS2017 network intrusion dataset patterns
-- Nmap stealth SYN scanning, Hydra credential spraying, hping3 DoS flooding
-- TCP flag analysis (SYN/ACK/RST patterns), port profiling, connection frequency analysis
-- Zero-day detection via structural anomaly scoring
+You are a hardened cybersecurity forensic engine. Your reasoning is AUGMENTED by a GraphSAGE GNN model trained on CICIDS2017 network flows.
 
-Your reasoning is AUGMENTED by a GraphSAGE GNN model trained on CICIDS2017 network flows.
-The GNN computes a structural anomaly score [0.0 = benign, 1.0 = critical attack]. Treat it as expert forensic evidence.
+You will receive an extracted telemetry payload containing GNN structural anomaly scores, 5-signal consensus matrix metrics, and packet flow statistics.
 
-CRITICAL RULES — You MUST follow these without exception:
-1. If GNN score >= 0.75: Classify as UNKNOWN_ZERO_DAY (min severity 8) UNLESS features clearly match a known pattern.
-2. If GNN score >= 0.4 AND rule features match (syn_count > 5, unique_dst_ports > 3): Classify as PORT_SCAN (severity 7-8).
-3. If GNN score >= 0.3 AND (failed_auth_count > 0 OR high request volume on single port): Classify as BRUTE_FORCE (severity 7-8).
-4. If GNN score >= 0.3 AND connection_frequency >= 15: Classify as DOS_ATTACK (severity 8-9).
-5. NEVER classify as BENIGN if GNN score > 0.3. A score of 0.3+ means the GNN has detected structural anomalies.
-6. If a rule signature fired (watcher detected the attack type) AND GNN score > 0.2, ALWAYS agree with the watcher.
-7. Low GNN score (< 0.2) with no rule hit = BENIGN. Otherwise escalate appropriately.
+CRITICAL INSTRUCTIONS:
+1. Always output ONLY valid raw JSON conforming strictly to the schema below. Do NOT output markdown or explanations outside JSON.
+2. Determine if an attack or anomaly is occurring based on GNN score (>0.3 is elevated) and network indicators.
+3. Map the attack to the precise MITRE ATT&CK technique (e.g., "T1046 - Network Service Discovery", "T1110 - Brute Force", "T1498 - Network Denial of Service", "T1078 - Valid Accounts").
+4. Provide the Kill Chain stage ("Reconnaissance", "Initial Access", "Execution", "Persistence", "Privilege Escalation", "Lateral Movement", "Impact").
+5. Provide a crisp, factual justification citing GNN score and observed flow metrics.
+6. Provide exact active defense remediation commands (e.g., iptables rules targeting the source IP).
 
-IMPORTANT: Output ONLY raw JSON. Keep explanation and reason concise (under 25 words each). Do NOT output reasoning thoughts.
-
-Severity scale:
-- 1-3: Noise / informational (LOG only)
-- 4-6: Low threat (ALERT)
-- 7-8: Active attack (CONTAIN — block source IP, isolate service)
-- 9-10: Critical / destructive (LOCKDOWN — full containment + forensic capture)
-
-Respond ONLY in strict JSON:
+Required JSON Schema:
 {
-    "threat_type": "PORT_SCAN|DOS_ATTACK|BRUTE_FORCE|SUSPICIOUS_LOGIN|FILE_ANOMALY|UNKNOWN_ZERO_DAY|BENIGN",
-    "confidence": 0.0-1.0,
-    "severity": 1-10,
-    "attack_pattern": "MITRE ATT&CK technique",
-    "action": "LOG|ALERT|CONTAIN|LOCKDOWN",
-    "explanation": "one short summary sentence",
-    "reason": "short technical reason citing GNN score and features",
-    "indicators": ["indicator 1", "indicator 2"],
-    "mitigation": "iptables command"
+  "anomaly_detected": true,
+  "confidence": 0.94,
+  "mitre_technique": "T1046 - Network Service Discovery",
+  "kill_chain_stage": "Reconnaissance",
+  "justification": "GNN anomaly score (0.874) combined with elevated SYN-to-ACK ratio and high port entropy confirms a stealth horizontal port scan across subnet 172.28.0.0/24.",
+  "active_defense_actions": [
+    "iptables -A INPUT -s 172.28.0.10 -j DROP"
+  ]
 }"""
 
     def __init__(self, api_url: str = None, model_name: str = None):
@@ -110,8 +94,10 @@ Respond ONLY in strict JSON:
                             {"role": "system", "content": self.SYSTEM_PROMPT},
                             {"role": "user", "content": prompt}
                         ],
-                        "temperature": 0.1,
-                        "max_tokens": 1024
+                        "temperature": 0.0,
+                        "top_p": 1.0,
+                        "max_tokens": 300,
+                        "response_format": {"type": "json_object"}
                     }
                     async with session.post(self.api_url, json=payload, timeout=aiohttp.ClientTimeout(total=GEMMA_TIMEOUT)) as resp:
                         if resp.status == 200:
@@ -128,7 +114,7 @@ Respond ONLY in strict JSON:
                         "prompt": f"{self.SYSTEM_PROMPT}\n\n{prompt}",
                         "format": "json",
                         "stream": False,
-                        "options": {"temperature": 0.1}
+                        "options": {"temperature": 0.0, "top_p": 1.0}
                     }
                     async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=GEMMA_TIMEOUT)) as resp:
                         if resp.status == 200:
@@ -143,7 +129,8 @@ Respond ONLY in strict JSON:
             return self._fallback_analysis(event)
 
     def _parse_json_verdict(self, response_text: str, event: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse structured JSON verdict from LLM text response with robust markdown code-fence extraction"""
+        """Parse structured JSON verdict conforming strictly to schema with deterministic fallback mapping"""
+        src_ip = event.get('source_ip', 'unknown')
         try:
             clean_text = response_text.strip()
             # Extract content between markdown code blocks if present
@@ -169,43 +156,65 @@ Respond ONLY in strict JSON:
                     if not clean_text.endswith("}"):
                         clean_text = clean_text + ('"}' if clean_text.endswith('"') else '}')
 
-            analysis = json.loads(clean_text)
+            data = json.loads(clean_text)
 
-            # Robust Confidence parsing
-            raw_conf = analysis.get('confidence', 0.9)
-            if isinstance(raw_conf, str):
-                if 'high' in raw_conf.lower(): conf_val = 0.95
-                elif 'med' in raw_conf.lower(): conf_val = 0.75
-                elif 'low' in raw_conf.lower(): conf_val = 0.40
-                else:
-                    try: conf_val = float(raw_conf.replace('%', '')) / 100.0 if float(raw_conf.replace('%', '')) > 1.0 else float(raw_conf)
-                    except: conf_val = 0.85
-            else:
-                conf_val = float(raw_conf)
-                if conf_val > 1.0: conf_val /= 100.0
+            anomaly_detected = data.get('anomaly_detected', True)
+            raw_conf = data.get('confidence', 0.90)
+            try:
+                confidence = float(raw_conf)
+                if confidence > 1.0:
+                    confidence /= 100.0
+            except:
+                confidence = 0.90
 
-            # Robust Severity parsing
-            raw_sev = analysis.get('severity', 6)
-            if isinstance(raw_sev, str):
-                if 'crit' in raw_sev.lower() or 'high' in raw_sev.lower(): sev_val = 8
-                elif 'med' in raw_sev.lower(): sev_val = 6
-                elif 'low' in raw_sev.lower(): sev_val = 3
-                else:
-                    try: sev_val = int(raw_sev)
-                    except: sev_val = 6
+            mitre_technique = data.get('mitre_technique', data.get('attack_pattern', 'T1046 - Network Service Discovery'))
+            kill_chain_stage = data.get('kill_chain_stage', 'Reconnaissance')
+            justification = data.get('justification') or data.get('reason') or data.get('explanation') or f"GNN score {event.get('gnn_score', 0.0):.4f} flagged telemetry anomaly."
+
+            raw_actions = data.get('active_defense_actions') or data.get('mitigation') or []
+            if isinstance(raw_actions, list) and raw_actions:
+                active_defense_actions = [str(a) for a in raw_actions]
+            elif isinstance(raw_actions, str) and raw_actions:
+                active_defense_actions = [raw_actions]
             else:
-                sev_val = int(raw_sev)
+                active_defense_actions = [f"iptables -A INPUT -s {src_ip} -j DROP"]
+
+            # Map MITRE technique to canonical threat_type for dashboard & downstream rules
+            tech_lower = mitre_technique.lower()
+            if 't1046' in tech_lower or 'discovery' in tech_lower or 'scan' in tech_lower or 'port' in tech_lower:
+                threat_type = 'PORT_SCAN'
+                severity = 7
+            elif 't1110' in tech_lower or 'brute' in tech_lower or 'credential' in tech_lower:
+                threat_type = 'BRUTE_FORCE'
+                severity = 8
+            elif 't1498' in tech_lower or 't1499' in tech_lower or 'dos' in tech_lower or 'denial' in tech_lower or 'flood' in tech_lower:
+                threat_type = 'DOS_ATTACK'
+                severity = 9
+            elif 't1078' in tech_lower or 'login' in tech_lower or 'account' in tech_lower:
+                threat_type = 'SUSPICIOUS_LOGIN'
+                severity = 7
+            elif not anomaly_detected:
+                threat_type = 'BENIGN'
+                severity = 2
+            else:
+                threat_type = event.get('type') if event.get('type') not in ('UNKNOWN', 'BENIGN') else 'UNKNOWN_ZERO_DAY'
+                severity = 8
 
             return {
-                "threat_type": analysis.get('threat_type', 'UNKNOWN'),
-                "confidence": round(conf_val, 2),
-                "severity": max(1, min(10, sev_val)),
-                "attack_pattern": analysis.get('attack_pattern', 'Detected network anomaly'),
-                "action": analysis.get('action', 'CONTAIN' if sev_val >= 6 else 'ALERT'),
-                "explanation": analysis.get('explanation', 'Network anomaly detected'),
-                "reason": analysis.get('reason', f"GNN Anomaly score {event.get('gnn_score', 0.0)} flagged suspicious features."),
-                "indicators": analysis.get('indicators', [f"Source IP {event.get('source_ip', 'unknown')}"]),
-                "mitigation": analysis.get('mitigation', f"iptables -A INPUT -s {event.get('source_ip', 'unknown')} -j DROP"),
+                "threat_type": threat_type,
+                "confidence": round(confidence, 2),
+                "severity": severity,
+                "anomaly_detected": anomaly_detected,
+                "mitre_technique": mitre_technique,
+                "kill_chain_stage": kill_chain_stage,
+                "justification": justification,
+                "active_defense_actions": active_defense_actions,
+                "attack_pattern": mitre_technique,
+                "action": "CONTAIN" if severity >= 6 else ("LOCKDOWN" if severity >= 9 else "LOG"),
+                "explanation": justification,
+                "reason": justification,
+                "indicators": [f"Source IP: {src_ip}", f"MITRE: {mitre_technique}", f"Stage: {kill_chain_stage}"],
+                "mitigation": active_defense_actions[0] if active_defense_actions else f"iptables -A INPUT -s {src_ip} -j DROP",
                 "source": "GEMMA_LLM",
                 "ai_confidence": "HIGH"
             }
