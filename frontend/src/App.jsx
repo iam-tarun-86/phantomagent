@@ -11,12 +11,12 @@ import RedAlertModal from './components/RedAlertModal'
 import ThreatDetailModal from './components/ThreatDetailModal'
 
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [selectedThreat, setSelectedThreat] = useState(null)
-  const { alert, approveThreat, dismissThreat, isConnected } = useDashboard()
+  const { alert, approveThreat, dismissThreat, isConnected, isAuthenticated } = useDashboard()
 
+  // Authentication is owned by DashboardContext — it also gates the WebSocket.
   if (!isAuthenticated) {
-    return <LoginPage onLogin={() => setIsAuthenticated(true)} />
+    return <LoginPage />
   }
 
   return (

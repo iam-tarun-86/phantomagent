@@ -1,0 +1,9 @@
+# Test dependencies. Install alongside requirements.txt:
+#   backend/venv/bin/pip install -r backend/requirements-dev.txt
+#
+# Run the suite from the repo root:
+#   backend/venv/bin/python -m pytest
+
+pytest==9.1.1
+pytest-asyncio==1.4.0
+httpx==0.28.1

@@ -6,10 +6,24 @@ from datetime import datetime
 from typing import Dict, List, Set
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from backend.database import db
-from backend.config import API_HOST, API_PORT, WATCHED_LOGS, WATCHED_PATHS, NETWORK_INTERFACE
+from backend.auth import authenticate_operator, require_token, token_is_valid
+from backend.config import (
+    API_HOST,
+    API_PORT,
+    API_TOKEN,
+    APPROVAL_TIMEOUT_SECONDS,
+    AUTH_PASSWORD_HASH,
+    CORS_ORIGINS,
+    DEMO_MODE,
+    NETWORK_INTERFACE,
+    TOKEN_IS_EPHEMERAL,
+    WATCHED_LOGS,
+    WATCHED_PATHS,
+)
 from backend.models.threat import Threat, ThreatType, ThreatStatus
 from backend.watchers.log_watcher import LogWatcher
 from backend.watchers.network_watcher import NetworkWatcher
@@ -133,10 +147,15 @@ class DashboardState:
         threat_confidence = analysis.get('confidence', 0)
         threat_indicators = analysis.get('indicators', [])
         
+        # The responder consumes this structured intent; it is never a shell string.
+        defense_action = analysis.get('defense_action') or {"action": "NONE", "target_ip": ""}
+
         if decision['requires_approval']:
             threat.status = ThreatStatus.PENDING
+            pending_threat = threat.to_dict()
+            pending_threat['defense_action'] = defense_action
             self.pending_approvals[threat.id] = {
-                "threat": threat.to_dict(),
+                "threat": pending_threat,
                 "decision": decision,
                 "timestamp": datetime.now().isoformat()
             }
@@ -160,12 +179,14 @@ class DashboardState:
             
             await self.add_log("DECISION", "CRITICAL", f"Severity {threat.severity} → PENDING_APPROVAL")
             
-            # Start the 15-second auto-containment timeout
+            # Start the operator-approval countdown
             asyncio.create_task(self.handle_approval_timeout(threat.id))
         
         elif decision['auto_execute']:
             threat.status = ThreatStatus.AUTO_CONTAINED
-            result = await self.responder.execute(decision['action'], threat.to_dict())
+            auto_threat = threat.to_dict()
+            auto_threat['defense_action'] = defense_action
+            result = await self.responder.execute(decision['action'], auto_threat)
             
             await self.broadcast_pipeline(4, threat.to_dict())
             await self.add_log("RESPONSE", "INFO", "Auto-contained")
@@ -198,11 +219,11 @@ class DashboardState:
         await self.broadcast({"type": "pipeline", "data": self.pipeline_state})
 
     async def handle_approval_timeout(self, threat_id: str):
-        """Wait 15 seconds, and if human hasn't responded, auto-contain it."""
-        await asyncio.sleep(15)
+        """Wait for the operator window to lapse, then auto-contain."""
+        await asyncio.sleep(APPROVAL_TIMEOUT_SECONDS)
         
         if threat_id in self.pending_approvals:
-            print(f"[TIMEOUT] Threat {threat_id} auto-approved after 15s timeout")
+            print(f"[TIMEOUT] Threat {threat_id} auto-approved after {APPROVAL_TIMEOUT_SECONDS}s timeout")
             
             # Prevent double-processing
             if threat_id in self.processing_actions:
@@ -231,9 +252,30 @@ class DashboardState:
 state = DashboardState()
 
 
+def _print_auth_banner():
+    """Surface the credentials needed to reach a now-authenticated API."""
+    print("=" * 72)
+    if TOKEN_IS_EPHEMERAL:
+        print("[AUTH] No PHANTOM_API_TOKEN set — generated an ephemeral token for this run:")
+        print(f"[AUTH]   {API_TOKEN}")
+        print("[AUTH] It changes on every restart. Set PHANTOM_API_TOKEN to pin it.")
+    else:
+        print("[AUTH] Using PHANTOM_API_TOKEN from the environment.")
+    if not AUTH_PASSWORD_HASH:
+        print("[AUTH] WARNING: PHANTOM_PASSWORD_HASH is unset — falling back to the dev")
+        print("[AUTH]          password. Set a hash before exposing this beyond loopback.")
+    print("=" * 72)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("[MAIN] Starting PhantomAgent backend...")
+
+    _print_auth_banner()
+
+    # Install the PHANTOM chain up front so the first containment does not pay for it.
+    await state.responder.ensure_chain()
+
     await state.gemma.initialize()
     
     state.log_watcher = LogWatcher(WATCHED_LOGS, state.process_event)
@@ -252,19 +294,33 @@ async def lifespan(app: FastAPI):
     yield
     
     print("[MAIN] Shutting down...")
-    await state.log_watcher.stop()
-    await state.network_watcher.stop()
-    state.file_watcher.stop()
+
+    # Each step is isolated: a watcher that fails to stop (e.g. Scapy raising
+    # PermissionError when not running as root) must not prevent the firewall chain from
+    # being torn down. Skipping that teardown leaves live DROP rules on the host.
+    async def _shutdown_step(label, fn):
+        try:
+            result = fn()
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as e:
+            print(f"[MAIN] Shutdown step '{label}' failed: {type(e).__name__}: {e}")
+
+    await _shutdown_step("log_watcher", state.log_watcher.stop)
+    await _shutdown_step("network_watcher", state.network_watcher.stop)
+    await _shutdown_step("file_watcher", state.file_watcher.stop)
+    # Leave no live DROP rules behind after Ctrl+C.
+    await _shutdown_step("iptables_cleanup", state.responder.cleanup_chain)
 
 
 app = FastAPI(title="PhantomAgent API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -307,6 +363,12 @@ async def update_telemetry():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    # Validate before accepting: an unauthenticated socket never joins the broadcast set.
+    if not token_is_valid(websocket.query_params.get("token")):
+        await websocket.close(code=1008, reason="Invalid or missing API token")
+        print("[WS] Rejected unauthenticated connection")
+        return
+
     await websocket.accept()
     state.clients.add(websocket)
     print(f"[WS] Client connected. Total: {len(state.clients)}")
@@ -345,27 +407,66 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"[WS] Client removed. Total: {len(state.clients)}")
 
 
-@app.get("/api/telemetry")
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+def require_demo_mode():
+    """Gate the fabricated-threat injection endpoints behind DEMO_MODE."""
+    if not DEMO_MODE:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+@app.post("/api/auth/login")
+async def login(payload: LoginRequest):
+    """Exchange operator credentials for the API token."""
+    if not authenticate_operator(payload.username, payload.password):
+        # Deliberately vague: do not reveal which half was wrong.
+        raise HTTPException(status_code=401, detail="Access denied")
+
+    print(f"[AUTH] Operator '{payload.username}' authenticated")
+    return {"token": API_TOKEN, "user": payload.username}
+
+
+@app.get("/api/blocks", dependencies=[Depends(require_token)])
+async def list_blocks():
+    """Currently installed firewall blocks."""
+    return {"blocked_ips": state.responder.get_blocked_ips()}
+
+
+@app.post("/api/blocks/{ip}/release", dependencies=[Depends(require_token)])
+async def release_block(ip: str):
+    """Remove a block. Containment was previously irreversible without shell access."""
+    if not state.responder.is_blockable_ip(ip):
+        raise HTTPException(status_code=400, detail="Invalid IP address")
+
+    released = await state.responder.unblock_ip(ip)
+    await state.add_log("RESPONSE", "INFO", f"Block released for {ip}")
+    return {"status": "RELEASED" if released else "NOT_BLOCKED", "ip": ip}
+
+
+@app.get("/api/telemetry", dependencies=[Depends(require_token)])
 async def get_telemetry():
     return state.telemetry
 
 
-@app.get("/api/threats")
+@app.get("/api/threats", dependencies=[Depends(require_token)])
 async def get_threats():
     return state.threats
 
 
-@app.get("/api/logs")
+@app.get("/api/logs", dependencies=[Depends(require_token)])
 async def get_logs(limit: int = 50):
     return state.logs[-limit:]
 
 
 # NEW: Fetch ALL historical logs from database for fullscreen viewer
-@app.get("/api/logs/all")
+@app.get("/api/logs/all", dependencies=[Depends(require_token)])
 async def get_all_logs():
     return db.load_logs(limit=1000)
 
-@app.delete("/api/logs/all")
+@app.delete("/api/logs/all", dependencies=[Depends(require_token)])
 async def delete_all_logs():
     db.clear_all_logs()
     state.logs = []
@@ -374,7 +475,7 @@ async def delete_all_logs():
     return {"status": "cleared"}
 
 
-@app.post("/api/threats/approve-all")
+@app.post("/api/threats/approve-all", dependencies=[Depends(require_token)])
 async def approve_all_threats():
     print(f"[HTTP] APPROVE ALL received. Pending count: {len(state.pending_approvals)}")
     pending_ids = list(state.pending_approvals.keys())
@@ -406,7 +507,7 @@ async def approve_all_threats():
     return {"status": "ALL_CONTAINED", "count": len(results)}
 
 
-@app.post("/api/threats/{threat_id}/approve")
+@app.post("/api/threats/{threat_id}/approve", dependencies=[Depends(require_token)])
 async def approve_threat(threat_id: str):
     print(f"[HTTP] APPROVE received for: {threat_id}")
     
@@ -439,7 +540,7 @@ async def approve_threat(threat_id: str):
         state.processing_actions.discard(threat_id)
 
 
-@app.post("/api/threats/{threat_id}/dismiss")
+@app.post("/api/threats/{threat_id}/dismiss", dependencies=[Depends(require_token)])
 async def dismiss_threat(threat_id: str):
     print(f"[HTTP] DISMISS received for: {threat_id}")
     
@@ -465,7 +566,7 @@ async def dismiss_threat(threat_id: str):
         state.processing_actions.discard(threat_id)
 
 
-@app.post("/api/test/inject")
+@app.post("/api/test/inject", dependencies=[Depends(require_token), Depends(require_demo_mode)])
 async def inject_test_event():
     event = {
         "source": "WATCHER",
@@ -493,7 +594,7 @@ async def inject_test_event():
     return {"status": "injected", "clients": len(state.clients)}
 
 
-@app.post("/api/test/inject-auto")
+@app.post("/api/test/inject-auto", dependencies=[Depends(require_token), Depends(require_demo_mode)])
 async def inject_test_event_auto():
     event = {
         "source": "WATCHER",
@@ -521,7 +622,7 @@ async def inject_test_event_auto():
     return {"status": "injected", "clients": len(state.clients), "mode": "auto_contain"}
 
 
-@app.post("/api/test/inject-lateral")
+@app.post("/api/test/inject-lateral", dependencies=[Depends(require_token), Depends(require_demo_mode)])
 async def inject_lateral_movement():
     """Simulate advanced persistent threat — lateral movement"""
     event = {
@@ -550,7 +651,7 @@ async def inject_lateral_movement():
     return {"status": "injected", "clients": len(state.clients), "mode": "lateral"}
 
 
-@app.post("/api/test/inject-ransomware")
+@app.post("/api/test/inject-ransomware", dependencies=[Depends(require_token), Depends(require_demo_mode)])
 async def inject_ransomware():
     """Simulate ransomware behavior"""
     event = {
@@ -578,7 +679,7 @@ async def inject_ransomware():
     print(f"[TEST-RANSOMWARE] Injecting ransomware event. Clients: {len(state.clients)}")
     await state.process_event(event)
     return {"status": "injected", "clients": len(state.clients), "mode": "ransomware"}
-@app.get("/api/connections")
+@app.get("/api/connections", dependencies=[Depends(require_token)])
 async def get_connections():
     """Get real-time network connections from the system"""
     import psutil

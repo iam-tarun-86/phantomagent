@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { ShieldAlert, ShieldCheck, X, Clock, Globe, AlertTriangle, FileText, Layers, CheckCircle } from 'lucide-react'
 import ParticleBurst from './ParticleBurst'
 import { useDashboard } from '../context/DashboardContext.jsx'
+import { authFetch } from '../services/auth'
 
 const RedAlertModal = ({ isOpen, threat, onApprove, onDismiss }) => {
     const { threats, approveThreat } = useDashboard()
@@ -169,7 +170,7 @@ const RedAlertModal = ({ isOpen, threat, onApprove, onDismiss }) => {
         setPhase('containing')
 
         try {
-            await fetch('http://localhost:8000/api/threats/approve-all', { method: 'POST' })
+            await authFetch('/threats/approve-all', { method: 'POST' })
             pendingList.forEach(t => {
                 const id = t.threat_id || t.id
                 if (id) approveThreat(id)

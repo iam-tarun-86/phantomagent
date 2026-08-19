@@ -1,5 +1,14 @@
-const WS_URL = 'ws://localhost:8000/ws';
-const API_URL = 'http://localhost:8000/api';
+import { authFetch, getToken } from './auth';
+
+/**
+ * Resolve the WebSocket URL from the page origin so the Vite proxy handles it in dev and
+ * the app still works when served from any other host. Override with VITE_WS_URL.
+ */
+function resolveWsUrl() {
+    if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+    const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    return `${scheme}://${window.location.host}/ws`;
+}
 
 class WebSocketService {
     constructor() {
@@ -16,6 +25,13 @@ class WebSocketService {
             return;
         }
 
+        // The socket is authenticated; without a token the server would just close it.
+        const token = getToken();
+        if (!token) {
+            console.warn('[WS] No auth token — not connecting');
+            return;
+        }
+
         // Clear any existing reconnect timer
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
@@ -23,7 +39,7 @@ class WebSocketService {
         }
 
         this.intentionallyClosed = false;
-        this.ws = new WebSocket(WS_URL);
+        this.ws = new WebSocket(`${resolveWsUrl()}?token=${encodeURIComponent(token)}`);
 
         this.ws.onopen = () => {
             console.log('[WS] Connected');
@@ -41,13 +57,20 @@ class WebSocketService {
             }
         };
 
-        this.ws.onclose = () => {
+        this.ws.onclose = (event) => {
             console.log('[WS] Disconnected');
             this.connected = false;
             this.emit('connection', { status: 'disconnected' });
             this.ws = null;
 
-            // Only auto-reconnect if we didn't intentionally close
+            // 1008 = policy violation, i.e. the server rejected our token. Reconnecting
+            // with the same credentials would just loop.
+            if (event.code === 1008) {
+                console.error('[WS] Authentication rejected — not retrying');
+                this.emit('auth_error', { reason: event.reason || 'Invalid token' });
+                return;
+            }
+
             if (!this.intentionallyClosed) {
                 this.reconnectTimer = setTimeout(() => this.connect(), 3000);
             }
@@ -76,10 +99,7 @@ class WebSocketService {
 
     async approveThreat(threatId) {
         try {
-            const response = await fetch(`${API_URL}/threats/${threatId}/approve`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
+            const response = await authFetch(`/threats/${threatId}/approve`, { method: 'POST' });
             const data = await response.json();
             console.log('[HTTP] Approve response:', data);
             return data;
@@ -91,10 +111,7 @@ class WebSocketService {
 
     async dismissThreat(threatId) {
         try {
-            const response = await fetch(`${API_URL}/threats/${threatId}/dismiss`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
+            const response = await authFetch(`/threats/${threatId}/dismiss`, { method: 'POST' });
             const data = await response.json();
             console.log('[HTTP] Dismiss response:', data);
             return data;

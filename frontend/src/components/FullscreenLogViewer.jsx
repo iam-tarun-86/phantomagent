@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Terminal, Clock, AlertTriangle, Info, AlertCircle, Minimize2, Trash2 } from 'lucide-react'
 import { useDashboard } from '../context/DashboardContext.jsx'
+import { authFetch } from '../services/auth'
 const LOG_COLORS = {
     INFO: 'text-neon-cyan',
     WARN: 'text-warning-amber',
@@ -25,7 +26,7 @@ const FullscreenLogViewer = ({ isOpen, onClose }) => {
 
     const handleDeleteLogs = async () => {
         try {
-            await fetch('/api/logs/all', { method: 'DELETE' })
+            await authFetch('/logs/all', { method: 'DELETE' })
             setLogs([])
             clearLogs()
         } catch (err) {
@@ -50,7 +51,7 @@ const FullscreenLogViewer = ({ isOpen, onClose }) => {
     useEffect(() => {
         if (isOpen) {
             setLoading(true)
-            fetch('/api/logs/all')
+            authFetch('/logs/all')
                 .then(res => res.json())
                 .then(data => {
                     setLogs(data || [])

@@ -20,7 +20,11 @@ CRITICAL INSTRUCTIONS:
 3. Map the attack to the precise MITRE ATT&CK technique (e.g., "T1046 - Network Service Discovery", "T1110 - Brute Force", "T1498 - Network Denial of Service", "T1078 - Valid Accounts").
 4. Provide the Kill Chain stage ("Reconnaissance", "Initial Access", "Execution", "Persistence", "Privilege Escalation", "Lateral Movement", "Impact").
 5. Provide a crisp, factual justification citing GNN score and observed flow metrics.
-6. Provide exact active defense remediation commands (e.g., iptables rules targeting the source IP).
+6. Select ONE remediation intent from the fixed vocabulary below. You do NOT write shell
+   commands — the response engine builds them. Your only free field is the target IP.
+     - "BLOCK_IP" : drop all traffic from the source IP at the firewall
+     - "BAN_SSH"  : ban the source IP from SSH via fail2ban (credential attacks)
+     - "NONE"     : no active response warranted (benign traffic)
 
 Required JSON Schema:
 {
@@ -29,9 +33,10 @@ Required JSON Schema:
   "mitre_technique": "T1046 - Network Service Discovery",
   "kill_chain_stage": "Reconnaissance",
   "justification": "GNN anomaly score (0.874) combined with elevated SYN-to-ACK ratio and high port entropy confirms a stealth horizontal port scan across subnet 172.28.0.0/24.",
-  "active_defense_actions": [
-    "iptables -A INPUT -s 172.28.0.10 -j DROP"
-  ]
+  "defense_action": {
+    "action": "BLOCK_IP",
+    "target_ip": "172.28.0.10"
+  }
 }"""
 
     def __init__(self, api_url: str = None, model_name: str = None):
@@ -96,9 +101,16 @@ Required JSON Schema:
                             "mitre_technique": {"type": "string"},
                             "kill_chain_stage": {"type": "string"},
                             "justification": {"type": "string"},
-                            "active_defense_actions": {
-                                "type": "array",
-                                "items": {"type": "string"}
+                            "defense_action": {
+                                "type": "object",
+                                "properties": {
+                                    "action": {
+                                        "type": "string",
+                                        "enum": ["BLOCK_IP", "BAN_SSH", "NONE"]
+                                    },
+                                    "target_ip": {"type": "string"}
+                                },
+                                "required": ["action", "target_ip"]
                             }
                         },
                         "required": [
@@ -107,7 +119,7 @@ Required JSON Schema:
                             "mitre_technique",
                             "kill_chain_stage",
                             "justification",
-                            "active_defense_actions"
+                            "defense_action"
                         ]
                     }
                     payload = {
@@ -210,13 +222,7 @@ Required JSON Schema:
             kill_chain_stage = data.get('kill_chain_stage', 'Reconnaissance')
             justification = data.get('justification') or data.get('reason') or data.get('explanation') or f"GNN score {event.get('gnn_score', 0.0):.4f} flagged telemetry anomaly."
 
-            raw_actions = data.get('active_defense_actions') or data.get('mitigation') or []
-            if isinstance(raw_actions, list) and raw_actions:
-                active_defense_actions = [str(a) for a in raw_actions]
-            elif isinstance(raw_actions, str) and raw_actions:
-                active_defense_actions = [raw_actions]
-            else:
-                active_defense_actions = [f"iptables -A INPUT -s {src_ip} -j DROP"]
+            defense_action = self._parse_defense_action(data, src_ip)
 
             # Map MITRE technique to canonical threat_type for dashboard & downstream rules
             tech_lower = mitre_technique.lower()
@@ -247,19 +253,64 @@ Required JSON Schema:
                 "mitre_technique": mitre_technique,
                 "kill_chain_stage": kill_chain_stage,
                 "justification": justification,
-                "active_defense_actions": active_defense_actions,
+                "defense_action": defense_action,
                 "attack_pattern": mitre_technique,
                 "action": "CONTAIN" if severity >= 6 else ("LOCKDOWN" if severity >= 9 else "LOG"),
                 "explanation": justification,
                 "reason": justification,
                 "indicators": [f"Source IP: {src_ip}", f"MITRE: {mitre_technique}", f"Stage: {kill_chain_stage}"],
-                "mitigation": active_defense_actions[0] if active_defense_actions else f"iptables -A INPUT -s {src_ip} -j DROP",
+                "mitigation": self._describe_action(defense_action),
                 "source": "GEMMA_LLM",
                 "ai_confidence": "HIGH"
             }
         except Exception as e:
             print(f"[GEMMA-LLM] JSON decoding exception ({e}): raw text = {response_text[:100]}...")
             return self._fallback_analysis(event)
+
+    VALID_ACTIONS = ("BLOCK_IP", "BAN_SSH", "NONE")
+
+    def _parse_defense_action(self, data: Dict[str, Any], src_ip: str) -> Dict[str, str]:
+        """
+        Extract the structured remediation intent from a model verdict.
+
+        The model may only choose from a fixed action vocabulary; anything unrecognised
+        degrades to BLOCK_IP against the observed source IP rather than being executed
+        as written. Free-text commands are never accepted — the responder builds argv.
+        """
+        raw = data.get('defense_action')
+        action = None
+        target_ip = src_ip
+
+        if isinstance(raw, dict):
+            candidate = str(raw.get('action', '')).strip().upper()
+            if candidate in self.VALID_ACTIONS:
+                action = candidate
+            candidate_ip = str(raw.get('target_ip', '')).strip()
+            if candidate_ip:
+                target_ip = candidate_ip
+        elif isinstance(raw, str) and raw.strip().upper() in self.VALID_ACTIONS:
+            action = raw.strip().upper()
+
+        if action is None:
+            # Includes the legacy `active_defense_actions` shape, which we deliberately
+            # do not parse: a model emitting command strings gets the default response.
+            action = 'NONE' if data.get('anomaly_detected') is False else 'BLOCK_IP'
+
+        return {"action": action, "target_ip": target_ip}
+
+    @staticmethod
+    def _describe_action(defense_action: Dict[str, str]) -> str:
+        """Human-readable rendering of the intent, for dashboard display only.
+
+        This string is never executed — see Responder.build_structured_action.
+        """
+        action = defense_action.get('action', 'NONE')
+        ip = defense_action.get('target_ip', 'unknown')
+        if action == 'BLOCK_IP':
+            return f"iptables -A PHANTOM -s {ip} -j DROP"
+        if action == 'BAN_SSH':
+            return f"fail2ban-client set sshd banip {ip}"
+        return "NONE"
 
     def _build_prompt(self, event: Dict[str, Any]) -> str:
         """Construct structured prompt from features, GNN score, and 5-Signal Consensus Matrix"""
@@ -335,35 +386,42 @@ Apply PHANTOM-BRAIN rules using 5-Signal evidence matrix. Return JSON verdict no
             action = "CONTAIN"
             explanation = f"Sequential port probe detected from {src_ip} targeting {dst_ports} ports."
             reason = f"GNN score {gnn_score:.2f} + SYN count {syn_count} across {dst_ports} ports indicates Nmap stealth scan."
-            mitigation = f"iptables -A INPUT -s {src_ip} -p tcp --dport 1:65535 -j DROP"
+            defense = "BLOCK_IP"
         elif conn_freq >= 30.0:
             threat_type = "DOS_ATTACK"
             severity = 9
             action = "LOCKDOWN"
             explanation = f"Connection flooding attack detected from {src_ip} at {conn_freq} pkts/sec."
             reason = f"High frequency connection flood ({conn_freq} pkts/s) with GNN anomaly score {gnn_score:.2f}."
-            mitigation = f"iptables -A INPUT -s {src_ip} -m limit --limit 10/s -j ACCEPT"
+            defense = "BLOCK_IP"
         elif failed_auth >= 3:
             threat_type = "BRUTE_FORCE"
             severity = 8
             action = "CONTAIN"
             explanation = f"Authentication brute-force detected from {src_ip} with {failed_auth} failed logins."
             reason = f"Multiple failed login attempts ({failed_auth}) from {src_ip}. GNN anomaly score {gnn_score:.2f}."
-            mitigation = f"fail2ban-client set sshd banip {src_ip}"
+            defense = "BAN_SSH"
         elif gnn_score > 0.75:
             threat_type = "UNKNOWN_ZERO_DAY"
             severity = 8
             action = "CONTAIN"
             explanation = f"Zero-day structural anomaly detected from {src_ip} by GNN model."
             reason = f"GNN structural anomaly score {gnn_score:.4f} exceeded threshold 0.75 without matching known attack signatures."
-            mitigation = f"iptables -A INPUT -s {src_ip} -j DROP"
+            defense = "BLOCK_IP"
         else:
             threat_type = "BENIGN"
             severity = 2
             action = "LOG"
             explanation = f"Normal network traffic pattern from {src_ip}."
             reason = f"Features and GNN anomaly score ({gnn_score:.2f}) are within benign operational bounds."
-            mitigation = "NONE"
+            defense = "NONE"
+
+        # The fallback picks an intent from the same fixed vocabulary the LLM uses; the
+        # responder builds the actual command from it.
+        defense_action = {
+            "action": defense,
+            "target_ip": src_ip if defense != "NONE" else "",
+        }
 
         return {
             "threat_type": threat_type,
@@ -374,7 +432,8 @@ Apply PHANTOM-BRAIN rules using 5-Signal evidence matrix. Return JSON verdict no
             "explanation": explanation,
             "reason": reason,
             "indicators": [f"Source IP: {src_ip}", f"GNN Score: {gnn_score:.4f}", f"Unique Ports: {dst_ports}"],
-            "mitigation": mitigation,
+            "defense_action": defense_action,
+            "mitigation": self._describe_action(defense_action),
             "source": "GEMMA_FALLBACK",
             "ai_confidence": "HIGH"
         }

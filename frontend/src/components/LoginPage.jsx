@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useDashboard } from '../context/DashboardContext.jsx'
 
 const BOOT_LINES = [
   { text: 'PhantomAgent Kernel v1.0.0 initialized', status: 'OK' },
@@ -37,7 +38,8 @@ const CRTScanlines = () => (
   }} />
 )
 
-const LoginPage = ({ onLogin }) => {
+const LoginPage = () => {
+  const { login } = useDashboard()
   const [bootComplete, setBootComplete] = useState(false)
   const [bootIndex, setBootIndex] = useState(0)
   const [username, setUsername] = useState('')
@@ -101,12 +103,13 @@ const LoginPage = ({ onLogin }) => {
     }
 
     setIsLoading(true)
-    await new Promise(resolve => setTimeout(resolve, 1200))
-
-    if (username === 'admin' && password === 'phantom') {
-      onLogin()
-    } else {
-      setError('Access denied')
+    try {
+      // Credentials are verified by the backend, which returns the API token.
+      await login(username, password)
+      // On success the provider flips isAuthenticated and App swaps this screen out.
+    } catch (err) {
+      setError(err.message || 'Access denied')
+      setPassword('')
       setIsLoading(false)
     }
   }
@@ -284,7 +287,7 @@ const LoginPage = ({ onLogin }) => {
                 </form>
 
                 <div className="mt-8 text-[10px] text-[#33ff33]/30 font-mono">
-                  <div>Default credentials: admin / phantom</div>
+                  <div>Credentials set via PHANTOM_USER / PHANTOM_PASSWORD_HASH</div>
                   <div>Press Tab to move between fields | Enter to submit</div>
                 </div>
               </motion.div>

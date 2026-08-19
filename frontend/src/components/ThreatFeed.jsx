@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { AlertTriangle, ShieldAlert, Terminal, Globe, FileWarning, Brain, Filter } from 'lucide-react'
 import { useDashboard } from '../context/DashboardContext.jsx'
+import { authFetch } from '../services/auth'
 
 const THREAT_ICONS = {
     'Brute Force': Terminal,
@@ -123,8 +124,8 @@ const ThreatFeed = ({ onSelectThreat }) => {
                     <span className="text-sm font-mono font-bold tracking-wider text-data-white">LIVE THREATS</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                    <button onClick={() => fetch('http://localhost:8000/api/test/inject-auto', {method: 'POST'})} className="text-[9px] font-mono px-2 py-0.5 bg-warning-amber/20 text-warning-amber rounded border border-warning-amber/30 hover:bg-warning-amber/40 transition-colors cursor-pointer">AUTO</button>
-                    <button onClick={() => fetch('http://localhost:8000/api/test/inject-lateral', {method: 'POST'})} className="text-[9px] font-mono px-2 py-0.5 bg-alert-red/20 text-alert-red rounded border border-alert-red/30 hover:bg-alert-red/40 transition-colors cursor-pointer">APT</button>
+                    <button onClick={() => authFetch('/test/inject-auto', { method: 'POST' })} className="text-[9px] font-mono px-2 py-0.5 bg-warning-amber/20 text-warning-amber rounded border border-warning-amber/30 hover:bg-warning-amber/40 transition-colors cursor-pointer">AUTO</button>
+                    <button onClick={() => authFetch('/test/inject-lateral', { method: 'POST' })} className="text-[9px] font-mono px-2 py-0.5 bg-alert-red/20 text-alert-red rounded border border-alert-red/30 hover:bg-alert-red/40 transition-colors cursor-pointer">APT</button>
                     <div className="flex items-center gap-1 ml-1">
                         <div className="w-2 h-2 rounded-full bg-alert-red radar-pulse" />
                         <span className="text-[10px] font-mono text-alert-red font-bold">LIVE</span>

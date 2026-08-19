@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Globe, ArrowUpRight, ArrowDownLeft, Wifi } from 'lucide-react'
+import { authFetch } from '../services/auth'
 
 const LiveConnections = () => {
     const [connections, setConnections] = useState([])
@@ -9,7 +10,7 @@ const LiveConnections = () => {
     useEffect(() => {
         const fetchConnections = async () => {
             try {
-                const res = await fetch('/api/connections')
+                const res = await authFetch('/connections')
                 const data = await res.json()
                 setConnections(data || [])
                 setLoading(false)

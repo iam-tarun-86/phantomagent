@@ -54,7 +54,25 @@ fi
 # 3. Backend (requires sudo for Scapy)
 # ─────────────────────────────────────────
 echo "[3/4] Starting PhantomAgent Backend (FastAPI + Scapy + GNN + Gemma)..."
+
+# Load .env if present, then forward the PHANTOM_* vars through sudo (which otherwise
+# scrubs the environment). Without this, auth config set in your shell is silently lost.
+if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+fi
+
 sudo PYTHONPATH=/usr/local/lib/python3.12/dist-packages:/home/tarun/.local/lib/python3.12/site-packages:$(pwd) \
+    PHANTOM_API_TOKEN="${PHANTOM_API_TOKEN:-}" \
+    PHANTOM_USER="${PHANTOM_USER:-admin}" \
+    PHANTOM_PASSWORD_HASH="${PHANTOM_PASSWORD_HASH:-}" \
+    PHANTOM_HOST="${PHANTOM_HOST:-127.0.0.1}" \
+    PHANTOM_PORT="${PHANTOM_PORT:-8000}" \
+    PHANTOM_CORS_ORIGINS="${PHANTOM_CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}" \
+    PHANTOM_APPROVAL_TIMEOUT="${PHANTOM_APPROVAL_TIMEOUT:-15}" \
+    PHANTOM_DEMO_MODE="${PHANTOM_DEMO_MODE:-true}" \
     backend/venv/bin/python run.py &
 BACKEND_PID=$!
 echo "      Backend running under PID ${BACKEND_PID} at http://localhost:8000"

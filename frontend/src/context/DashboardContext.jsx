@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import wsService from '../services/websocket';
+import * as auth from '../services/auth';
 
 const DashboardContext = createContext(null);
 
@@ -34,6 +35,7 @@ const playCriticalSound = () => {
 };
 
 export const DashboardProvider = ({ children }) => {
+    const [isAuthenticated, setIsAuthenticated] = useState(() => auth.isAuthenticated());
     const [threats, setThreats] = useState([]);
     const [logs, setLogs] = useState([]);
     const [telemetry, setTelemetry] = useState({
@@ -85,6 +87,9 @@ export const DashboardProvider = ({ children }) => {
     }, [audioReady]);
 
     useEffect(() => {
+        // The socket is authenticated; connecting before login just gets closed with 1008.
+        if (!isAuthenticated) return;
+
         wsService.connect();
 
         const unsubs = [
@@ -164,8 +169,9 @@ export const DashboardProvider = ({ children }) => {
 
         return () => {
             unsubs.forEach(u => u());
+            wsService.disconnect();
         };
-    }, [audioReady]);
+    }, [audioReady, isAuthenticated]);
 
     const approveThreat = useCallback(async (id) => {
         if (actionLock.current) {
@@ -218,9 +224,24 @@ export const DashboardProvider = ({ children }) => {
         setLogs([]);
     }, []);
 
+    const login = useCallback(async (username, password) => {
+        await auth.login(username, password);
+        setIsAuthenticated(true);
+    }, []);
+
+    const logout = useCallback(() => {
+        wsService.disconnect();
+        auth.logout();
+        setIsAuthenticated(false);
+        setThreats([]);
+        setLogs([]);
+        setAlert(null);
+    }, []);
+
     return (
         <DashboardContext.Provider value={{
             threats, logs, telemetry, pipeline, alert, isConnected,
+            isAuthenticated, login, logout,
             approveThreat, dismissThreat, clearLogs
         }}>
             {children}
