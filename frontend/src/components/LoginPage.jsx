@@ -129,11 +129,26 @@ const LoginPage = ({ onLogin }) => {
       }} />
 
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6 }}
         className="relative z-10 w-full max-w-2xl px-4"
       >
+        {/* Prominent PhantomAgent Logo & Brand Header */}
+        <div className="text-center mb-6">
+          <div className="inline-flex items-center gap-2.5 px-4 py-1.5 rounded-full bg-[#33ff33]/10 border border-[#33ff33]/30 mb-3 shadow-[0_0_20px_rgba(51,255,51,0.15)]">
+            <div className="w-2 h-2 rounded-full bg-[#33ff33] animate-ping" />
+            <span className="text-[11px] font-mono text-[#33ff33] font-bold tracking-widest uppercase">AUTONOMOUS CYBER DEFENSE SYSTEM</span>
+          </div>
+          <h1 className="text-4xl sm:text-5xl font-black tracking-widest flex items-center justify-center gap-3">
+            <span className="text-[#33ff33] drop-shadow-[0_0_25px_rgba(51,255,51,0.6)] font-mono">PHANTOM</span>
+            <span className="text-data-white font-mono drop-shadow-[0_0_20px_rgba(255,255,255,0.3)]">AGENT</span>
+          </h1>
+          <p className="text-xs font-mono text-[#33ff33]/50 mt-1.5 tracking-wider">
+            GNN EYES + GEMMA LLM BRAIN · ACTIVE THREAT CONTAINMENT
+          </p>
+        </div>
+
         <div className="bg-[#1a1a1a] border border-[#33ff33]/20 rounded-t-lg px-4 py-2 flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-[#ff5f56]" />
           <div className="w-3 h-3 rounded-full bg-[#ffbd2e]" />
