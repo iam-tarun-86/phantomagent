@@ -154,6 +154,7 @@ class DashboardState:
             threat.status = ThreatStatus.PENDING
             pending_threat = threat.to_dict()
             pending_threat['defense_action'] = defense_action
+            pending_threat['gnn_score'] = gnn_score
             self.pending_approvals[threat.id] = {
                 "threat": pending_threat,
                 "decision": decision,
@@ -551,8 +552,14 @@ async def dismiss_threat(threat_id: str):
     
     try:
         if threat_id in state.pending_approvals:
-            state.pending_approvals.pop(threat_id)
+            pending = state.pending_approvals.pop(threat_id)
             await state.add_log("DECISION", "INFO", f"Threat {threat_id} dismissed")
+
+            # An operator saying "not a threat" is a free benign label — fold the score
+            # back into the conformal calibration set so the baseline tracks reality.
+            gnn_score = pending.get('threat', {}).get('gnn_score')
+            if isinstance(gnn_score, (int, float)):
+                state.decision.consensus_gate.conformal_predictor.add_calibration_sample(float(gnn_score))
             
             await state.broadcast({
                 "type": "dismissed",

@@ -42,12 +42,29 @@ echo "[2/4] Initializing storage directories..."
 mkdir -p data backend/models
 chmod -R 777 data/ 2>/dev/null || true
 
-if [ ! -f "backend/models/gnn_cicids2017.pt" ]; then
-    echo "      GNN weights not found — training model..."
-    PYTHONPATH=. backend/venv/bin/python backend/scripts/generate_dataset.py
+# Training produces three artefacts and all three are load-bearing: the checkpoint
+# carries the normalization statistics, and the two JSON files calibrate the conformal
+# and behavioural signals. A stale set means those signals silently degrade to fallbacks.
+MODEL_ARTEFACTS=(
+    "backend/models/gnn_cicids2017.pt"
+    "backend/models/calibration_scores.json"
+    "backend/models/benign_baseline.json"
+)
+MISSING_ARTEFACT=""
+for artefact in "${MODEL_ARTEFACTS[@]}"; do
+    if [ ! -f "$artefact" ]; then
+        MISSING_ARTEFACT="$artefact"
+        break
+    fi
+done
+
+if [ -n "$MISSING_ARTEFACT" ]; then
+    echo "      Missing ${MISSING_ARTEFACT} — training model..."
+    [ -f "backend/data/cicids2017_subset.csv" ] || \
+        PYTHONPATH=. backend/venv/bin/python backend/scripts/generate_dataset.py
     PYTHONPATH=. backend/venv/bin/python backend/scripts/train_gnn.py
 else
-    echo "      GNN model weights found."
+    echo "      GNN model weights + calibration artefacts found."
 fi
 
 # ─────────────────────────────────────────
