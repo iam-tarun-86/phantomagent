@@ -461,7 +461,270 @@ Problems Solved:
 Verification Completed:
 - Production frontend build (`npm run build`) passed in 2.53s with 0 errors.
 - Verified backend endpoints, timestamp formats, and modal responsiveness.
+
+
+-------------------------------------------------------------------------------
+PHASE 17 — Automated Test Harness (pytest) & Retirement of Print Scripts
+-------------------------------------------------------------------------------
+Problem Solved:
+- `test_phase2..6.py`, `test_event.py`, `test_watcher_priority.py`, `verify_e2e.py` were
+  print-based demo drivers with ZERO assertions that required a live backend.
+- pytest was collecting them; there was no way to tell whether any change broke the pipeline.
+
+What We Added:
+1. `pyproject.toml` with `[tool.pytest.ini_options]` (pythonpath=["."], asyncio_mode="auto").
+2. `backend/tests/` — real assertions for PreFilter, DecisionEngine severity routing,
+   ConsensusGate voting, and Responder input validation.
+3. `backend/requirements-dev.txt` (pytest, pytest-asyncio, httpx).
+4. Moved the old scripts to `scripts/manual/` with a README explaining they are not tests.
+5. Two tests deliberately PINNED known defects as baselines, to be inverted by later phases:
+   - test_conformal_vote_is_coupled_to_gnn_score
+   - test_destructive_iptables_currently_passes_prefix_check
+
+Verification Completed:
+- 52 tests passing. Baseline snapshot captured before any behaviour changed.
+
+Run the suite:  backend/venv/bin/python -m pytest
+
+
+-------------------------------------------------------------------------------
+PHASE 18 — Critical Security: Real Firewall Blocks, API Auth, Structured LLM Actions
+-------------------------------------------------------------------------------
+Problem Solved:
+1. FIREWALL BLOCKS WERE INERT. Rules were appended to chain PHANTOM but nothing ever
+   jumped to it, so packets never traversed it. Every "Blocked IP" logged was a no-op.
+2. The API was unauthenticated on 0.0.0.0 while shelling out with sudo. The login page
+   was a client-side string compare (`admin`/`phantom` hardcoded in LoginPage.jsx).
+3. CORS was allow_origins=["*"] with allow_credentials=True.
+4. Command validation was a PREFIX match, so `iptables -F`, `iptables -P INPUT ACCEPT`,
+   `iptables -X` and `docker stop <container>` all passed and executed with sudo.
+
+What We Added:
+1. `responder.py` rewritten:
+   - ensure_chain() links PHANTOM from BOTH INPUT and FORWARD (idempotent, -C guarded).
+     FORWARD IS MANDATORY: kali->juice_shop is container-to-container across the bridge
+     and never traverses INPUT. An INPUT-only jump silently drops nothing.
+   - Duplicate-rule detection before -A; unblock_ip(); cleanup_chain() on shutdown.
+   - Structural argv templates with typed placeholders replace prefix matching.
+   - docker stop/kill removed from the allowlist entirely.
+   - All subprocess calls moved off the event loop via asyncio.to_thread.
+2. `backend/auth.py` — bearer token on all 15 /api routes AND the WebSocket (validated
+   BEFORE accept()). POST /api/auth/login backed by PBKDF2. API_HOST now 127.0.0.1.
+3. `gemma_engine.py` — the LLM no longer emits shell commands at all. Response schema is
+   now {action: BLOCK_IP|BAN_SSH|NONE, target_ip}; the responder builds the argv itself.
+4. New endpoints: GET /api/blocks, POST /api/blocks/{ip}/release.
+5. `.env.example`; start.sh forwards PHANTOM_* vars through sudo (which scrubs env).
+6. Frontend: `services/auth.js`, token-gated WebSocket, relative WS URL derived from
+   location.host (was hardcoded ws://localhost:8000).
+
+Verification Completed:
+- 149 tests passing.
+- LIVE: unauthenticated inject -> 401; `iptables -L PHANTOM -n -v` shows
+  "Chain PHANTOM (2 references)" with a real DROP rule; chain fully removed on shutdown.
+- Also fixed: a watcher raising PermissionError on stop() aborted the shutdown sequence
+  BEFORE the iptables teardown, leaving live DROP rules after exit. Steps now isolated.
+
+
+-------------------------------------------------------------------------------
+PHASE 19 — GNN Normalization Persistence & Consensus Signal Independence
+-------------------------------------------------------------------------------
+Problem Solved:
+1. TRAIN/INFERENCE SKEW. train_gnn.py did `GNNPredictor.MEANS = means` — an in-memory
+   class-attribute write that was NEVER SAVED. Only state_dict() was persisted, so
+   inference fell back to hardcoded constants that did not match the training set.
+   Measured: at unique_dst_ports=10 the score moved 0.7457 -> 0.0144, flipping the vote.
+2. The conformal calibration set was 21 hardcoded values capped at 0.35, making the
+   floor p-value 1/22 = 0.0455 — no resolution at all under alpha=0.05.
+3. BEHAVIOURAL COLD START was degenerate: it used the RAW METRIC VALUE as the Z-score
+   for any IP without history, so every unseen host sending >3 packets was "anomalous",
+   including one sending four benign packets.
+
+What We Added:
+1. Checkpoint v2 dicts carrying means/stds/feature_keys alongside weights, with a
+   feature-order assertion and a loud warning on legacy v1 files.
+   NOTE: statistics MUST be plain lists — torch.load(weights_only=True) refuses numpy
+   globals, and the first attempt silently fell back to UNTRAINED weights (benign
+   scored 0.54). Caught by the test asserting benign < 0.2, not by inspection.
+2. Seeded training (torch.manual_seed(42)) — retraining is now byte-reproducible.
+3. `models/calibration_scores.json` — 500 real benign scores emitted at training time.
+4. `models/benign_baseline.json` — benign per-metric prior for behavioural cold start.
+   Unseen IPs are scored against the benign population, or ABSTAIN if no prior exists.
+5. ConsensusGate restructured around EVIDENCE SOURCES (gnn + conformal = one source).
+6. Operator dismissals now feed add_calibration_sample() (previously dead code).
+
+Verification Completed:
+- 186 tests passing.
+- Benign browsing went from 1 evidence source to 0; attacks retain 28-298 sigma margins.
+
+*** CORRECTION (recorded in Phase 22) ***
+The claim that the evidence-source rule stopped a single model carrying a verdict was
+WRONG. See Phase 22 for the enumeration that disproved it.
+
+
+-------------------------------------------------------------------------------
+PHASE 20 — Threat Status Persistence, Async SQLite & Repository Hygiene
+-------------------------------------------------------------------------------
+Problem Solved:
+1. STATUS TRANSITIONS WERE NEVER PERSISTED. save_threat() ran once while a threat was
+   still PENDING_APPROVAL. Approve, dismiss and the auto-timeout all broadcast to the UI
+   but never wrote back, so the DB permanently claimed every critical threat was pending.
+2. `requirements.txt` was UTF-16-LE with CRLF AND four UTF-8 lines appended to the end —
+   a mixed-encoding PowerShell `pip freeze >` artifact that pip cannot parse on Linux.
+3. Every log line opened a fresh sqlite connection inline in the async path, and
+   `with sqlite3.connect(...)` commits but does NOT close — connections leaked until GC.
+4. Three competing DB paths: config.DB_PATH (unused), database.py, event_logger.py.
+
+What We Added:
+1. Database.update_threat_status() + action_taken/resolved_at columns, migrated in place
+   for existing databases. All five transition paths wired via a record_status() helper.
+2. requirements.txt rewritten as grouped UTF-8; numpy added (imported but undeclared).
+3. One WAL-mode connection behind a threading.Lock; all writes via asyncio.to_thread;
+   batch save_logs(); indexes on threats(status) and threats(created_at).
+4. All DB paths resolve through config.
+5. Untracked generated files: data/phantomagent.db (1.8MB binary churn), the GNN
+   checkpoint, calibration artefacts, the dataset, and 22 forensic reports.
+
+Verification Completed:
+- 205 tests passing.
+- LIVE: approve a threat -> DB reads CONTAINED with action_taken recorded.
+
+*** ALSO FIXED (pre-existing, predates this work — verified against commit 500c015) ***
+All four /api/test/inject* fixtures declared source "WATCHER", but the severity-preserving
+override in process_event only matches TEST_API/API/SIMULATION. THAT BRANCH HAD NEVER
+FIRED. Every fixture's severity, reason, confidence and indicators were silently
+discarded and THE RED ALERT MODAL NEVER OPENED from the demo buttons.
+  inject            sev 1 LOGGED  -> sev 9  PENDING_APPROVAL
+  inject-auto       sev 4         -> sev 7  AUTO_CONTAINED
+  inject-lateral    sev 3 LOGGED  -> sev 8  AUTO_CONTAINED
+  inject-ransomware sev 4         -> sev 10 PENDING_APPROVAL
+
+
+-------------------------------------------------------------------------------
+PHASE 21 — Telemetry De-duplication, Timer Lifecycle & Lint Backlog
+-------------------------------------------------------------------------------
+Problem Solved:
+1. The WebSocket endpoint sent a SECOND telemetry copy on the same 2s cadence as the
+   broadcast task, doubling the message rate.
+2. Approval countdown tasks were never cancelled when an operator answered first.
+3. DecisionEngine built its OWN GemmaEngine, so the instance actually serving inference
+   was never initialize()d while the warmed one sat unused.
+4. ThreatDetailModal called useEffect AFTER an early return (hook count changed between
+   renders) — the only hard lint error.
+
+What We Added:
+1. Per-socket telemetry loop removed; endpoint now blocks on receive() so disconnects
+   raise WebSocketDisconnect instead of being inferred from a failed send.
+2. state.approval_timers tracks task handles; cancelled on approve/approve-all/dismiss.
+3. One shared GemmaEngine, injected into DecisionEngine.
+4. Hook hoisted above the guard. RedAlertModal's auto-escalate effect depended on
+   activeThreat (which falls back to `{}`, a new object every render); switched to
+   threatId, and handleApprove hoisted ABOVE the effect so it can legally appear in the
+   dependency array (deps evaluate during render, where the const was still in TDZ).
+5. Removed 8 unused imports, an unused variable, 2 bare `except:` clauses.
+
+Verification Completed:
+- 210 tests passing. Lint: 1 error + 14 warnings -> 0 errors + 1 warning.
+- LIVE: telemetry frames over a real socket went from ~6 per 6.5s to 2.
+
+
+-------------------------------------------------------------------------------
+PHASE 22 — Real Graph Neural Network: Message Passing Over Host Graphs
+-------------------------------------------------------------------------------
+Problem Solved:
+*** THE GNN WAS NOT A GNN. *** `adj_matrix` was never passed — not in training, not at
+inference. The message-passing branch in forward() was DEAD CODE. The model advertised
+as GraphSAGE was, in every executing path, a 4-layer MLP on 7 scalar features.
+Also: nothing in this project was ever CICIDS2017. `cicids2017_subset.csv` was generated
+by 41 np.random calls in generate_dataset.py.
+
+What We Added:
+1. `FeatureExtractor.get_graph_snapshot()` — builds the window's communication graph.
+   Nodes = IPs, edges = "A sent packets to B". The per-IP deques already held both
+   endpoints; nothing new is captured.
+2. Real GraphSAGE aggregation: the layer sees [self_embedding ; mean(neighbours)] rather
+   than the neighbour mean alone, so isolated benign hosts still score correctly.
+   Checkpoint v3 (sage layer input is 2*hidden — v2 weights are incompatible).
+3. `predict_graph_scores(snapshot)` scores a whole window in one pass.
+   `predict_anomaly_score(features)` unchanged for single-host callers.
+4. Dataset rebuilt as GRAPH WINDOWS and renamed honestly:
+     backend/data/synthetic_graphs.jsonl   (2300 windows, 22k nodes, 16.7k edges)
+     backend/data/synthetic_flows.csv      (flat table, for the behavioural baseline)
+     backend/models/gnn_phantom.pt
+   CICIDS2017 claim removed from the LLM system prompt and GNNPanel.jsx.
+5. CRITICAL DESIGN POINT: a benign "multi-service client" archetype whose scalar
+   features are IDENTICAL to a port scanner's BY CONSTRUCTION. The first attempt kept
+   them separable and the model learned the features and ignored topology entirely —
+   zero-day recall collapsed to 0.9%. They are now separated only by neighbourhood: a
+   scanner's targets answer with RSTs, a monitoring agent's do not.
+6. `backend/scripts/ablation.py` — three ablations, reproducible.
+7. `scripts/demo_judges.sh` — four narrated acts + `--check` preflight that verifies
+   venv, torch, all three model artefacts, docker, sudo, containers, backend
+   reachability and stale PHANTOM rules. Exits non-zero on anything that would break a
+   live presentation. Mutates nothing in --check mode.
+
+Verification Completed:
+- 213 tests passing, including one asserting that IDENTICAL node features with different
+  neighbours produce OPPOSITE verdicts.
+
+ABLATION 1 — same architecture, same data, same seed, adjacency on vs off:
+                            F1        Precision   False positives
+  GNN (message passing)     1.0000    1.0000      0
+  MLP (no graph)            0.7445    0.5930      162
+  Port-scan windows only (features identical by construction):
+  GNN                       1.0000    1.0000      0
+  MLP                       0.5878    0.4162      115
+
+LIVE END-TO-END (identical node features, only neighbourhood differs):
+  port scanner  (RST-heavy neighbours)   gnn 1.0000  sev 7  CONTAIN
+  monitoring agent (healthy neighbours)  gnn 0.0000  sev 3  LOG
+
+*** CORRECTION TO PHASE 19 ***
+Phase 19 claimed the evidence-source gate rule stopped a single model carrying a verdict.
+Enumerating ALL 32 vote combinations disproved this:
+  - The old flat 3-of-5 rule ALREADY rejected gnn+conformal alone. Both rules reject it.
+  - One corroborating signal sufficed under BOTH rules. Unchanged.
+  - The new rule is MORE PERMISSIVE: 25 of 32 combinations pass, vs 16 under flat.
+It is a CORRECTNESS fix (correlated evidence no longer double-counted), NOT a
+false-positive reduction. Docstring corrected; ablation 3 prints the comparison.
+Threshold stays at 2 deliberately — raising it to 3 tightens to 13 combinations but
+suppresses single-window port scans (which produce only structural + behavioural).
+
+
+-------------------------------------------------------------------------------
+KNOWN OPEN ITEMS (deliberate, not oversights)
+-------------------------------------------------------------------------------
+1. Lateral movement recall ~1.7%. One message-passing layer cannot propagate along a
+   chain. Architecturally this is what the kill-chain correlator signal exists for —
+   which is also the justification for having five signals rather than one.
+2. PHANTOM_PASSWORD_HASH unset — login accepts the dev fallback password. Set before
+   the dashboard is reachable from another machine. Generate with:
+     PYTHONPATH=. backend/venv/bin/python -c \
+       "from backend.config import hash_password; print(hash_password('your-password'))"
+3. 2,853 forensic reports in backend/data/ — one per containment, no rotation.
+4. Demo fixture IPs are plausible private addresses (192.168.1.105, 10.0.0.45,
+   192.168.1.50, 185.220.101.47). Containment is REAL now, so a demo click installs a
+   genuine DROP rule. RFC 5737 ranges (192.0.2.x, 203.0.113.x) would remove the risk.
+5. pending_approvals is IN-MEMORY. Restarting the backend mid-incident loses every
+   pending critical threat with no record.
+6. Lint: 1 remaining warning (only-export-components on DashboardContext) — Fast Refresh
+   developer experience only, no runtime effect.
+7. Training metrics are 1.0000 because the synthetic generator produces clean classes.
+   The ABLATION is the meaningful number, not the headline accuracy.
+
+
+-------------------------------------------------------------------------------
+QUICK REFERENCE
+-------------------------------------------------------------------------------
+Run tests:        backend/venv/bin/python -m pytest
+Retrain model:    PYTHONPATH=. backend/venv/bin/python backend/scripts/generate_dataset.py
+                  PYTHONPATH=. backend/venv/bin/python backend/scripts/train_gnn.py
+Ablations:        PYTHONPATH=. backend/venv/bin/python backend/scripts/ablation.py
+Demo preflight:   ./scripts/demo_judges.sh --check
+Full demo:        ./scripts/demo_judges.sh
+Check firewall:   sudo iptables -L PHANTOM -n -v
+Release a block:  curl -X POST -H "Authorization: Bearer $PHANTOM_API_TOKEN" \
+                    http://localhost:8000/api/blocks/172.28.0.10/release
+
+Auth: token printed in the backend boot banner unless PHANTOM_API_TOKEN is set.
+Model artefacts regenerate automatically via start.sh when missing.
 ===============================================================================
-
-
-
