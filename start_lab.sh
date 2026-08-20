@@ -24,12 +24,12 @@ echo "[2/4] Initializing Storage Directories..."
 mkdir -p data backend/models
 
 # 3. Check GNN Model Weights
-if [ ! -f "backend/models/gnn_cicids2017.pt" ]; then
+if [ ! -f "backend/models/gnn_phantom.pt" ]; then
     echo "      GNN model weights not found. Generating dataset and training GNN..."
     PYTHONPATH=. python3 backend/scripts/generate_dataset.py
     PYTHONPATH=. python3 backend/scripts/train_gnn.py
 else
-    echo "      GNN model weights found at backend/models/gnn_cicids2017.pt."
+    echo "      GNN model weights found at backend/models/gnn_phantom.pt."
 fi
 
 # 4. Start Backend Server with Scapy Packet Sniffing Capability

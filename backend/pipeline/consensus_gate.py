@@ -14,9 +14,23 @@ Why this is not a flat 3-of-5 vote
 ----------------------------------
 Signals 1 and 2 are not independent. The conformal p-value is a monotonically decreasing
 function of the GNN score, so a high score necessarily produces a small p-value — signal
-2 restates signal 1 in different units. Under a flat 3-of-5 rule the GNN alone supplied
-two of the three votes needed, meaning a single model could carry a verdict with only
-one corroborating signal. That contradicts the property this gate exists to provide.
+2 restates signal 1 in different units. Counting them as two votes double-counts one
+piece of evidence, which is incoherent regardless of where the threshold sits.
+
+What the change to evidence sources did and did not do (measured over all 32 vote
+combinations; see backend/scripts/ablation.py):
+
+  - It did NOT newly prevent a GNN-only verdict. Under the old flat 3-of-5 rule,
+    gnn + conformal was 2 votes and already failed. Both rules reject it.
+  - It did NOT raise the amount of corroboration required. One independent signal
+    sufficed before and still suffices.
+  - It IS more permissive overall: 25 of 32 combinations pass, against 16 under the
+    flat rule. Every two-signal combination now passes, where flat required three.
+
+So this is a correctness fix (stop double-counting correlated evidence), not a
+false-positive reduction. Raising required_evidence_sources to 3 would tighten it to 13
+combinations, but a single-window port scan produces only structural + behavioural
+evidence, so a threshold of 3 suppresses real detections. 2 is the deliberate choice.
 
 So votes are grouped into independent EVIDENCE SOURCES:
 

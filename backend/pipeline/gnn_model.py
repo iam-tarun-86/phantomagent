@@ -8,25 +8,42 @@ import numpy as np
 
 from backend.config import BASE_DIR
 
-# Bumped when the checkpoint format changes. v2 carries normalization statistics
-# alongside the weights; v1 was a bare state_dict.
-CHECKPOINT_VERSION = 2
+# Bumped when the checkpoint format changes.
+#   v1  bare state_dict
+#   v2  + normalization statistics
+#   v3  + real neighbourhood aggregation (sage layer input is 2*hidden, so v2 weights
+#       are structurally incompatible and must be retrained)
+CHECKPOINT_VERSION = 3
 
-DEFAULT_MODEL_PATH = BASE_DIR / "models" / "gnn_cicids2017.pt"
+DEFAULT_MODEL_PATH = BASE_DIR / "models" / "gnn_phantom.pt"
 
 
 class GraphSAGEAnomalyModel(nn.Module):
     """
-    Graph Neural Network model (GraphSAGE-style aggregation)
-    node_features: [syn_count, ack_count, rst_count, unique_dst_ports, bytes_sent, connection_frequency, failed_auth_count]
+    GraphSAGE anomaly scorer over a host communication graph.
+
+    Nodes are IP addresses observed in a time window; edges are "A sent packets to B".
+    Node features are the 7 per-host flow statistics.
+
+    Why a graph and not an MLP: several attack patterns are invisible in any single
+    host's scalar features but obvious in the structure. A horizontal port scan is a
+    fan-out star; lateral movement is a chain of hosts each contacting the next; a
+    botnet is many sources converging on one destination. Message passing lets each
+    node's score depend on who it is talking to, not just on its own counters.
+
+    Aggregation follows GraphSAGE: the layer sees the node's own embedding concatenated
+    with the mean of its neighbours', rather than the neighbour mean alone -- keeping
+    self-information is what lets an isolated benign host still score correctly.
     """
     def __init__(self, in_features: int = 7, hidden_dim: int = 32):
         super().__init__()
-        # Layer 1: Local Feature Aggregation (Self + Neighbor Graph Embedding)
+        # Layer 1: per-node encoding
         self.fc1 = nn.Linear(in_features, hidden_dim)
-        self.gnn_layer = nn.Linear(hidden_dim, hidden_dim)
 
-        # Layer 2: Graph Context & Anomaly Score Head
+        # Layer 2: GraphSAGE aggregation over [self_embedding ; neighbour_mean]
+        self.sage = nn.Linear(hidden_dim * 2, hidden_dim)
+
+        # Head
         self.fc2 = nn.Linear(hidden_dim, 16)
         self.out = nn.Linear(16, 1)
 
@@ -34,23 +51,45 @@ class GraphSAGEAnomalyModel(nn.Module):
 
     def forward(self, x, adj_matrix=None):
         """
-        x: [batch_size, in_features]
-        adj_matrix: optional adjacency matrix for graph neighborhood message passing
+        x:          [num_nodes, in_features]
+        adj_matrix: [num_nodes, num_nodes] row-normalized, WITHOUT self-loops
+                    (self-information enters through the concatenation instead).
+                    None means every node is isolated -- neighbour mean is zero.
         """
         h = F.relu(self.fc1(x))
         h = self.dropout(h)
 
         if adj_matrix is not None:
-            # Message passing: Aggregate neighbor node embeddings
             neighbor_agg = torch.matmul(adj_matrix, h)
-            h = F.relu(self.gnn_layer(neighbor_agg))
         else:
-            h = F.relu(self.gnn_layer(h))
+            # No graph context: an isolated node has no neighbours to aggregate.
+            neighbor_agg = torch.zeros_like(h)
+
+        h = F.relu(self.sage(torch.cat([h, neighbor_agg], dim=-1)))
 
         h = F.relu(self.fc2(h))
         # Anomaly score between 0.0 and 1.0 (Sigmoid)
         score = torch.sigmoid(self.out(h))
         return score
+
+
+def build_adjacency(num_nodes: int, edges) -> "torch.Tensor":
+    """
+    Row-normalized adjacency (mean aggregator), treated as undirected.
+
+    Communication is evidence of a relationship in both directions: a scanned host is
+    just as structurally implicated as the scanner. Rows with no neighbours stay zero,
+    which the concatenation above handles.
+    """
+    adj = torch.zeros((num_nodes, num_nodes), dtype=torch.float32)
+    for a, b in edges:
+        if 0 <= a < num_nodes and 0 <= b < num_nodes and a != b:
+            adj[a, b] = 1.0
+            adj[b, a] = 1.0
+
+    degree = adj.sum(dim=1, keepdim=True)
+    degree[degree == 0] = 1.0
+    return adj / degree
 
 
 class GNNPredictor:
@@ -136,8 +175,11 @@ class GNNPredictor:
 
     def predict_anomaly_score(self, feature_dict: dict) -> float:
         """
-        Input: feature dictionary from FeatureExtractor
-        Output: Anomaly score float between 0.0 and 1.0
+        Score a single host with no graph context (isolated node).
+
+        Kept for callers that only have one host's features. Prefer
+        predict_graph_scores() where the communication graph is available -- structural
+        patterns like scan fan-out are invisible to this path by construction.
         """
         norm_arr = self.normalize(feature_dict)
         tensor_x = torch.tensor(norm_arr, dtype=torch.float32).unsqueeze(0)
@@ -147,3 +189,32 @@ class GNNPredictor:
             score = float(score_tensor.squeeze().item())
 
         return round(score, 4)
+
+    def predict_graph_scores(self, snapshot: dict) -> dict:
+        """
+        Score every host in a communication graph in one pass.
+
+        snapshot: {"nodes": [ip, ...], "features": [featdict, ...], "edges": [(i, j), ...]}
+                  as produced by FeatureExtractor.get_graph_snapshot()
+
+        Returns {ip: score}. Each score reflects both the host's own flow statistics and
+        the structure of its neighbourhood.
+        """
+        nodes = snapshot.get("nodes") or []
+        if not nodes:
+            return {}
+
+        features = snapshot.get("features") or []
+        x = np.stack([self.normalize(f) for f in features])
+        tensor_x = torch.tensor(x, dtype=torch.float32)
+
+        edges = snapshot.get("edges") or []
+        adj = build_adjacency(len(nodes), edges) if edges else None
+
+        with torch.no_grad():
+            scores = self.model(tensor_x, adj).squeeze(-1).tolist()
+
+        if isinstance(scores, float):  # single-node graph
+            scores = [scores]
+
+        return {ip: round(float(sc), 4) for ip, sc in zip(nodes, scores)}

@@ -95,7 +95,7 @@ const GNNPanel = ({ onClose }) => {
             </div>
             <div>
               <div className="text-sm font-mono font-bold text-data-white tracking-wider">GNN ANOMALY DETECTOR</div>
-              <div className="text-[10px] font-mono text-data-white/40">GraphSAGE · CICIDS2017 · Real-Time Inference</div>
+              <div className="text-[10px] font-mono text-data-white/40">GraphSAGE · Host Graph · Real-Time Inference</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -258,7 +258,7 @@ const GNNPanel = ({ onClose }) => {
             <div className="grid grid-cols-2 gap-2 text-[10px] font-mono">
               {[
                 ['Architecture', 'GraphSAGE (3-layer)'],
-                ['Training Data', 'CICIDS2017 Benchmark'],
+                ['Training Data', 'Synthetic host graphs'],
                 ['Zero-Day Method', 'Held-out Infiltration split'],
                 ['Inference', 'C++ / PyTorch real-time'],
                 ['Threshold', '0.75 → CRITICAL ANOMALY'],

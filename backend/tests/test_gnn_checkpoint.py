@@ -97,13 +97,67 @@ def test_benign_traffic_scores_low(predictor):
     assert score < 0.2, f"benign traffic scored {score}"
 
 
+SCANNER_FEATURES = {
+    "syn_count": 60, "ack_count": 20, "rst_count": 2, "unique_dst_ports": 45,
+    "bytes_sent": 1500, "connection_frequency": 30.0, "failed_auth_count": 0,
+}
+SCANNED_VICTIM = {
+    "syn_count": 1, "ack_count": 2, "rst_count": 40, "unique_dst_ports": 1,
+    "bytes_sent": 300, "connection_frequency": 8.0, "failed_auth_count": 0,
+}
+HEALTHY_SERVER = {
+    "syn_count": 1, "ack_count": 12, "rst_count": 1, "unique_dst_ports": 1,
+    "bytes_sent": 4000, "connection_frequency": 2.0, "failed_auth_count": 0,
+}
+
+
 @pytest.mark.skipif(not DEFAULT_MODEL_PATH.exists(), reason="model not trained yet")
-def test_port_scan_scores_high(predictor):
-    score = predictor.predict_anomaly_score({
-        "syn_count": 60, "ack_count": 2, "rst_count": 5, "unique_dst_ports": 45,
-        "bytes_sent": 1500, "connection_frequency": 30.0, "failed_auth_count": 0,
-    })
-    assert score > 0.5, f"port scan scored {score}"
+def test_scanner_features_alone_are_ambiguous(predictor):
+    """
+    By design. A port scanner and a benign monitoring agent have the same scalar
+    profile -- high SYN, many destination ports, high frequency. Nothing in this
+    feature vector can separate them, and the model must not pretend otherwise.
+    """
+    score = predictor.predict_anomaly_score(SCANNER_FEATURES)
+    assert score < 0.5, f"features alone should not convict; scored {score}"
+
+
+@pytest.mark.skipif(not DEFAULT_MODEL_PATH.exists(), reason="model not trained yet")
+def test_graph_context_convicts_the_scanner(predictor):
+    """The neighbourhood settles it: a scanner's targets answer with RSTs."""
+    snapshot = {
+        "nodes": ["attacker", "v1", "v2", "v3", "v4"],
+        "features": [SCANNER_FEATURES] + [SCANNED_VICTIM] * 4,
+        "edges": [(0, 1), (0, 2), (0, 3), (0, 4)],
+    }
+    scores = predictor.predict_graph_scores(snapshot)
+    assert scores["attacker"] > 0.5, f"scanner scored {scores['attacker']} with graph context"
+
+
+@pytest.mark.skipif(not DEFAULT_MODEL_PATH.exists(), reason="model not trained yet")
+def test_graph_context_clears_the_benign_agent(predictor):
+    """Identical features, healthy neighbours -> not a threat. The whole point."""
+    snapshot = {
+        "nodes": ["agent", "s1", "s2", "s3", "s4"],
+        "features": [SCANNER_FEATURES] + [HEALTHY_SERVER] * 4,
+        "edges": [(0, 1), (0, 2), (0, 3), (0, 4)],
+    }
+    scores = predictor.predict_graph_scores(snapshot)
+    assert scores["agent"] < 0.5, f"benign agent scored {scores['agent']}"
+
+
+@pytest.mark.skipif(not DEFAULT_MODEL_PATH.exists(), reason="model not trained yet")
+def test_topology_flips_the_verdict_on_identical_features(predictor):
+    """Same node features, different neighbours, opposite verdicts."""
+    scanner = predictor.predict_graph_scores({
+        "nodes": ["h", "a", "b"], "features": [SCANNER_FEATURES, SCANNED_VICTIM, SCANNED_VICTIM],
+        "edges": [(0, 1), (0, 2)],
+    })["h"]
+    agent = predictor.predict_graph_scores({
+        "nodes": ["h", "a", "b"], "features": [SCANNER_FEATURES, HEALTHY_SERVER, HEALTHY_SERVER],
+        "edges": [(0, 1), (0, 2)],
+    })["h"]
+    assert scanner > agent, f"topology had no effect: {scanner} vs {agent}"
 
 
 @pytest.mark.skipif(not DEFAULT_MODEL_PATH.exists(), reason="model not trained yet")

@@ -38,8 +38,23 @@ class DecisionEngine:
         rule_threat_type = event_data.get('type', 'UNKNOWN')   # Watcher's rule-based label
         rule_severity = event_data.get('severity', 5)          # Watcher's assigned severity
 
-        # 1. GNN 'Eyes': Predict structural anomaly score [0.0 - 1.0]
-        gnn_score = self.gnn.predict_anomaly_score(features)
+        # 1. GNN 'Eyes': structural anomaly score [0.0 - 1.0].
+        # Prefer the graph path -- scoring a host in isolation throws away the
+        # neighbourhood, which is the only thing distinguishing several attack patterns
+        # from benign traffic with the same feature vector.
+        graph = event_data.get('graph')
+        gnn_score = None
+        if graph and graph.get('nodes'):
+            try:
+                scores = self.gnn.predict_graph_scores(graph)
+                gnn_score = scores.get(src_ip)
+                event_data['graph_scores'] = scores
+            except Exception as e:
+                print(f"[DECISION] Graph scoring failed, falling back to isolated node: {e}")
+
+        if gnn_score is None:
+            gnn_score = self.gnn.predict_anomaly_score(features)
+
         event_data['gnn_score'] = gnn_score
 
         # 2. Consensus Gate (5-Signal Evidence Evaluation)

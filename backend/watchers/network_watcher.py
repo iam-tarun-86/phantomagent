@@ -126,12 +126,22 @@ class NetworkWatcher:
                 self._dispatch_alert("BRUTE_FORCE", 7, src_ip, features, "Real Brute Force / Credential Spraying detected")
 
     def _dispatch_alert(self, threat_type: str, severity: int, src_ip: str, features: Dict, msg: str):
+        # The communication graph observed in this window. The GNN scores every host
+        # using its neighbourhood, which is what separates a scanner from a benign
+        # monitoring agent -- their own feature vectors are indistinguishable.
+        try:
+            graph = self.feature_extractor.get_graph_snapshot()
+        except Exception as e:
+            print(f"[NETWORK] Could not build graph snapshot: {e}")
+            graph = None
+
         alert_payload = {
             "source": "NETWORK",
             "type": threat_type,
             "severity": severity,
             "source_ip": src_ip,
             "features": features,
+            "graph": graph,
             "raw_log": f"Real packet capture threat: {threat_type} from {src_ip} ({features['packet_count']} pkts, {features['unique_dst_ports']} ports)",
             "timestamp": datetime.now().isoformat(),
             "message": f"{msg} from {src_ip}: {features['packet_count']} pkts processed"

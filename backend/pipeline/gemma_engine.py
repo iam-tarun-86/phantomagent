@@ -10,7 +10,7 @@ class GemmaEngine:
     """Gemma 4 E4B LLM threat reasoning engine supporting OpenAI /v1/chat/completions and Ollama APIs"""
     
     SYSTEM_PROMPT = """You are PHANTOM-BRAIN, the embedded threat reasoning module of the PhantomAgent Autonomous Cyber Defense System.
-You are a hardened cybersecurity forensic engine. Your reasoning is AUGMENTED by a GraphSAGE GNN model trained on CICIDS2017 network flows.
+You are a hardened cybersecurity forensic engine. Your reasoning is AUGMENTED by a GraphSAGE graph neural network that scores each host using its communication neighbourhood, trained on synthetic host-communication graphs.
 
 You will receive an extracted telemetry payload containing GNN structural anomaly scores, 5-signal consensus matrix metrics, and packet flow statistics.
 

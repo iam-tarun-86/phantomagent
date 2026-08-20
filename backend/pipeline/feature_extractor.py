@@ -116,6 +116,43 @@ class FeatureExtractor:
             "failed_auth_count": failed_auth_count
         }
 
+    def get_graph_snapshot(self) -> Dict[str, Any]:
+        """
+        Build the communication graph observed in the current window.
+
+        Nodes are IP addresses; an edge exists where one host was seen sending packets
+        to another. This is the structure the GNN consumes: a port scan is a fan-out
+        star from one source, lateral movement is a chain of hosts each contacting the
+        next, and neither pattern is visible in a single host's scalar features.
+
+        Returns {"nodes": [ip, ...], "features": [featdict, ...], "edges": [(i, j), ...]}
+        with node indices matching the features list.
+        """
+        now = time.time()
+        cutoff = now - self.window_seconds
+
+        # Collect every IP that appeared as a source or destination in the window.
+        edges = set()
+        seen = []
+        for src_ip, window in self.ip_windows.items():
+            for t, pkt in window:
+                if t < cutoff:
+                    continue
+                dst_ip = pkt.get('dst_ip')
+                if src_ip not in seen:
+                    seen.append(src_ip)
+                if dst_ip and dst_ip not in seen:
+                    seen.append(dst_ip)
+                if dst_ip:
+                    edges.add((src_ip, dst_ip))
+
+        index = {ip: i for i, ip in enumerate(seen)}
+        return {
+            "nodes": seen,
+            "features": [self.get_features(ip) for ip in seen],
+            "edges": [(index[a], index[b]) for a, b in edges if a in index and b in index],
+        }
+
     def clear(self):
         """Clear window buffers."""
         self.ip_windows.clear()

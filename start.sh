@@ -46,7 +46,7 @@ chmod -R 777 data/ 2>/dev/null || true
 # carries the normalization statistics, and the two JSON files calibrate the conformal
 # and behavioural signals. A stale set means those signals silently degrade to fallbacks.
 MODEL_ARTEFACTS=(
-    "backend/models/gnn_cicids2017.pt"
+    "backend/models/gnn_phantom.pt"
     "backend/models/calibration_scores.json"
     "backend/models/benign_baseline.json"
 )
@@ -60,7 +60,7 @@ done
 
 if [ -n "$MISSING_ARTEFACT" ]; then
     echo "      Missing ${MISSING_ARTEFACT} — training model..."
-    [ -f "backend/data/cicids2017_subset.csv" ] || \
+    [ -f "backend/data/synthetic_graphs.jsonl" ] || \
         PYTHONPATH=. backend/venv/bin/python backend/scripts/generate_dataset.py
     PYTHONPATH=. backend/venv/bin/python backend/scripts/train_gnn.py
 else
