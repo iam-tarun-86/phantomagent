@@ -78,7 +78,7 @@ const RedAlertModal = ({ isOpen, threat, onApprove, onDismiss }) => {
         } else {
             if (oscillatorRef.current) {
                 clearInterval(oscillatorRef.current.modInterval)
-                try { oscillatorRef.current.osc.stop() } catch(e){}
+                try { oscillatorRef.current.osc.stop() } catch { /* already stopped */ }
                 oscillatorRef.current = null
             }
         }
@@ -86,7 +86,7 @@ const RedAlertModal = ({ isOpen, threat, onApprove, onDismiss }) => {
         return () => {
             if (oscillatorRef.current) {
                 clearInterval(oscillatorRef.current.modInterval)
-                try { oscillatorRef.current.osc.stop() } catch(e){}
+                try { oscillatorRef.current.osc.stop() } catch { /* already stopped */ }
                 oscillatorRef.current = null
             }
         }
@@ -120,15 +120,6 @@ const RedAlertModal = ({ isOpen, threat, onApprove, onDismiss }) => {
         }
     }, [isOpen, threatId])
 
-    // Auto-escalate at 0
-    useEffect(() => {
-        if (countdown === 0 && !autoEscalated.current && phase === 'alert' && isOpen && activeThreat) {
-            autoEscalated.current = true
-            console.log('[ALERT] Auto-escalating threat:', threatId)
-            handleApprove(null)
-        }
-    }, [countdown, phase, isOpen, activeThreat, threatId])
-
     const handleApprove = useCallback((e) => {
         if (phase !== 'alert') return
 
@@ -154,6 +145,18 @@ const RedAlertModal = ({ isOpen, threat, onApprove, onDismiss }) => {
             setPhase('contained')
         }, 1800)
     }, [phase, threatId, approveThreat, onApprove])
+
+    // Auto-escalate at 0.
+    // Depends on threatId, not activeThreat: the latter falls back to `{}` and so is a
+    // fresh object on every render, which re-ran this effect continuously.
+    useEffect(() => {
+        if (countdown === 0 && !autoEscalated.current && phase === 'alert' && isOpen && threatId) {
+            autoEscalated.current = true
+            console.log('[ALERT] Auto-escalating threat:', threatId)
+            handleApprove(null)
+        }
+    }, [countdown, phase, isOpen, threatId, handleApprove])
+
 
     const handleApproveAll = useCallback(async (e) => {
         if (phase !== 'alert') return

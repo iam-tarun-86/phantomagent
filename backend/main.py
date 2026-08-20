@@ -70,10 +70,14 @@ class DashboardState:
         self.clients: Set[WebSocket] = set()
         self.pending_approvals: Dict[str, Dict] = {}
         self.processing_actions: Set[str] = set()
+        self.approval_timers: Dict[str, asyncio.Task] = {}
         
         self.prefilter = PreFilter()
+        # One engine, shared. Previously DecisionEngine built its own, so the instance
+        # that actually ran inference was never initialize()d and connected lazily on
+        # the first request while this one sat warm and unused.
         self.gemma = GemmaEngine()
-        self.decision = DecisionEngine()
+        self.decision = DecisionEngine(gemma=self.gemma)
         self.responder = Responder()
         
         self.log_watcher = None
@@ -201,7 +205,11 @@ class DashboardState:
             await self.add_log("DECISION", "CRITICAL", f"Severity {threat.severity} → PENDING_APPROVAL")
             
             # Start the operator-approval countdown
-            asyncio.create_task(self.handle_approval_timeout(threat.id))
+            # Keep the handle so approve/dismiss can cancel the countdown instead of
+            # leaving an orphaned sleep that wakes to find the threat already gone.
+            self.approval_timers[threat.id] = asyncio.create_task(
+                self.handle_approval_timeout(threat.id)
+            )
         
         elif decision['auto_execute']:
             threat.status = ThreatStatus.AUTO_CONTAINED
@@ -242,6 +250,12 @@ class DashboardState:
 
         await self.broadcast({"type": "threat", "data": threat_dict})
     
+    def cancel_approval_timer(self, threat_id: str):
+        """Stop the auto-containment countdown once a human has answered."""
+        task = self.approval_timers.pop(threat_id, None)
+        if task and not task.done():
+            task.cancel()
+
     async def broadcast_pipeline(self, stage: int, data: Dict):
         self.pipeline_state = {"stage": stage, "threat_id": data.get('id', 'unknown')}
         await self.broadcast({"type": "pipeline", "data": self.pipeline_state})
@@ -276,6 +290,7 @@ class DashboardState:
                 })
             finally:
                 self.processing_actions.discard(threat_id)
+                self.approval_timers.pop(threat_id, None)
 
 
 state = DashboardState()
@@ -370,7 +385,8 @@ async def update_telemetry():
                 handle = pynvml.nvmlDeviceGetHandleByIndex(0)
                 info = pynvml.nvmlDeviceGetMemoryInfo(handle)
                 state.telemetry['vram'] = round(info.used / (1024**3), 1)
-            except:
+            except Exception:
+                # No NVML (no GPU, or driver unavailable) — fall back to an estimate.
                 state.telemetry['vram'] = round(5.6 + (state.telemetry['cpu'] / 100) * 0.5, 1)
             
             uptime_seconds = int(time.time() - start_time)
@@ -419,16 +435,15 @@ async def websocket_endpoint(websocket: WebSocket):
             }
         })
         
+        # Telemetry is already pushed to every client by the update_telemetry() task.
+        # This loop previously sent a second copy on the same 2s cadence, doubling the
+        # message rate. Block on receive() instead so a disconnect raises
+        # WebSocketDisconnect promptly rather than being inferred from a failed send.
         while True:
-            await asyncio.sleep(2)
-            try:
-                await websocket.send_json({
-                    "type": "telemetry",
-                    "data": state.telemetry
-                })
-            except Exception:
-                break
-            
+            await websocket.receive_text()
+
+    except WebSocketDisconnect:
+        print("[WS] Client disconnected")
     except Exception as e:
         print(f"[WS] Error/Disconnect: {type(e).__name__}")
     finally:
@@ -516,6 +531,7 @@ async def approve_all_threats():
         state.processing_actions.add(threat_id)
         try:
             if threat_id in state.pending_approvals:
+                state.cancel_approval_timer(threat_id)
                 pending = state.pending_approvals.pop(threat_id)
                 result = await state.responder.execute('LOCKDOWN', pending['threat'])
                 await record_status(threat_id, ThreatStatus.CONTAINED, result)
@@ -548,6 +564,7 @@ async def approve_threat(threat_id: str):
     
     try:
         if threat_id in state.pending_approvals:
+            state.cancel_approval_timer(threat_id)
             pending = state.pending_approvals.pop(threat_id)
             result = await state.responder.execute('LOCKDOWN', pending['threat'])
 
@@ -582,6 +599,7 @@ async def dismiss_threat(threat_id: str):
     
     try:
         if threat_id in state.pending_approvals:
+            state.cancel_approval_timer(threat_id)
             pending = state.pending_approvals.pop(threat_id)
             await record_status(threat_id, ThreatStatus.REJECTED)
             await state.add_log("DECISION", "INFO", f"Threat {threat_id} dismissed")

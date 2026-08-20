@@ -30,7 +30,6 @@ const KillChain = () => {
             const Icon = node.icon
             const isComplete = activeNode !== null && index <= activeNode
             const isActive   = activeNode === index && !isComplete
-            const isPast     = activeNode !== null && index < activeNode
 
             return (
               <div key={node.id} className="relative">

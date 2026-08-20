@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Terminal, Clock, AlertTriangle, Info, AlertCircle, Minimize2, Trash2 } from 'lucide-react'
+import { Terminal, Clock, AlertTriangle, Info, AlertCircle, Minimize2, Trash2 } from 'lucide-react'
 import { useDashboard } from '../context/DashboardContext.jsx'
 import { authFetch } from '../services/auth'
 const LOG_COLORS = {

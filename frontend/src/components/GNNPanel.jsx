@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { Brain, Activity, X, BarChart2, AlertTriangle, Zap, History, ShieldAlert } from 'lucide-react'
 import { useDashboard } from '../context/DashboardContext.jsx'
 

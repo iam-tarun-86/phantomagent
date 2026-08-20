@@ -215,7 +215,7 @@ Required JSON Schema:
                 confidence = float(raw_conf)
                 if confidence > 1.0:
                     confidence /= 100.0
-            except:
+            except (TypeError, ValueError):
                 confidence = 0.90
 
             mitre_technique = data.get('mitre_technique', data.get('attack_pattern', 'T1046 - Network Service Discovery'))

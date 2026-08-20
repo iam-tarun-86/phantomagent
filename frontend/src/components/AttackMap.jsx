@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Globe, MapPin, Shield, Crosshair } from 'lucide-react'
+import { Globe, MapPin, Shield } from 'lucide-react'
 import { useDashboard } from '../context/DashboardContext.jsx'
 import { getIPLocation, latLonToXY } from '../services/geoService.js'
 

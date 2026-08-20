@@ -12,9 +12,11 @@ from backend.utils.event_logger import EventLogger
 class DecisionEngine:
     """Routes threats and integrates GNN ('Eyes') + Gemma ('Brain') reasoning + Consensus Gate"""
 
-    def __init__(self):
+    def __init__(self, gemma: GemmaEngine = None):
         self.gnn = GNNPredictor()
-        self.gemma = GemmaEngine()
+        # Accept a shared engine so the instance the app initialize()s is the one that
+        # serves inference; fall back to a private one for tests and scripts.
+        self.gemma = gemma or GemmaEngine()
         self.consensus_gate = ConsensusGate(required_consensus_votes=3)
         self.logger = EventLogger()
         self.stats = {

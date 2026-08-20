@@ -1,12 +1,13 @@
 import React, { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ShieldAlert, ShieldCheck, X, Terminal, Brain, Activity, CheckCircle, AlertTriangle, Layers, Lock } from 'lucide-react'
+import { ShieldAlert, X, Terminal, Brain, Activity, CheckCircle, Layers, Lock } from 'lucide-react'
 
 const ThreatDetailModal = ({ threat, onClose, onApprove, onDismiss }) => {
-  if (!threat) return null
-
-  // Global ESC key listener to close modal
+  // Hooks must run before any early return, or React sees a different hook count
+  // between renders once `threat` goes from set to null.
   useEffect(() => {
+    if (!threat) return
+
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
         onClose?.()
@@ -14,7 +15,9 @@ const ThreatDetailModal = ({ threat, onClose, onApprove, onDismiss }) => {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  }, [threat, onClose])
+
+  if (!threat) return null
 
   const sb = threat.severity_breakdown || {}
   const baseSev = sb.base_severity ?? (threat.severity >= 7 ? threat.severity - 1 : threat.severity)

@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Terminal, Maximize2, Clock } from 'lucide-react'
+import { Terminal, Maximize2 } from 'lucide-react'
 import FullscreenLogViewer from './FullscreenLogViewer'
 
 const LOG_COLORS = {

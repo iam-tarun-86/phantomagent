@@ -98,7 +98,9 @@ export const DashboardProvider = ({ children }) => {
             wsService.on('init', (d) => {
                 setThreats(d.threats || []);
                 setLogs(d.logs || []);
-                setTelemetry(d.telemetry || telemetry);
+                // Functional update — reading `telemetry` from the closure captured a
+                // stale value and forced it into the effect's dependency array.
+                setTelemetry(prev => d.telemetry || prev);
                 setPipeline(d.pipeline || { stage: -1, threat_id: null });
                 setAlert(d.alert || null);
                 actionLock.current = false;
