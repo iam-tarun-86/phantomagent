@@ -14,19 +14,19 @@ echo "Target IP : ${TARGET_IP} (Juice Shop Container)"
 echo "Attacker  : Container '${KALI_CONTAINER}' (IP: 172.28.0.10)"
 echo "==============================================================================="
 
-# Check if Docker lab containers are running, auto-start if not
+# The lab belongs to ./start.sh, which also stops it on shutdown. Starting containers
+# here would leave them running after this script exits.
 echo "[PRE-CHECK] Verifying Docker lab containers..."
 if ! docker inspect -f '{{.State.Running}}' ${KALI_CONTAINER} 2>/dev/null | grep -q "true"; then
-    echo "[PRE-CHECK] Containers not running. Starting Docker lab..."
-    docker compose -f docker-compose.lab.yml up -d
-    echo "[PRE-CHECK] Waiting 3 seconds for containers to be ready..."
-    sleep 3
+    echo "[ERROR] Docker lab is not running."
+    echo "        Start the system first:  ./start.sh"
+    exit 1
 fi
 
 # Verify Kali can reach target
 if ! docker exec ${KALI_CONTAINER} ping -c 1 -W 2 ${TARGET_IP} >/dev/null 2>&1; then
     echo "[ERROR] Kali cannot reach ${TARGET_IP}. Docker lab network may be down."
-    echo "        Run: docker compose -f docker-compose.lab.yml up -d"
+    echo "        Start the system first:  ./start.sh"
     exit 1
 fi
 echo "[PRE-CHECK] Network verified: Kali -> ${TARGET_IP} OK"

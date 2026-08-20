@@ -12,6 +12,7 @@ FRONTEND_PID=""
 
 # Cleanup: kill backend/frontend + stop Docker lab containers
 cleanup() {
+    trap - SIGINT SIGTERM EXIT     # prevent re-entry via the exit below
     echo -e "\n[SYSTEM] Shutting down PhantomAgent..."
     [ -n "$BACKEND_PID" ] && kill "$BACKEND_PID" 2>/dev/null || true
     [ -n "$FRONTEND_PID" ] && kill "$FRONTEND_PID" 2>/dev/null || true
@@ -21,8 +22,9 @@ cleanup() {
     exit 0
 }
 
-# Trap Ctrl+C and SIGTERM
-trap cleanup SIGINT SIGTERM
+# EXIT is included deliberately: with `set -e`, a failing step or the backend dying
+# would otherwise end the script without ever stopping the containers.
+trap cleanup SIGINT SIGTERM EXIT
 
 # ─────────────────────────────────────────
 # 1. Docker Lab Containers

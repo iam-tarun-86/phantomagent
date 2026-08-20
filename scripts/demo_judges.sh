@@ -57,16 +57,11 @@ need "sudo without password"        "sudo -n true"
 
 if docker inspect -f '{{.State.Running}}' "$KALI" 2>/dev/null | grep -q true; then
     ok "kali_attacker running"
-elif [ "$CHECK_ONLY" = "1" ]; then
-    # --check must not change anything, including container state.
-    bad "kali_attacker not running — start it with: docker compose -f docker-compose.lab.yml up -d"
-    FAILED=1
 else
-    warn "kali_attacker not running — starting docker lab"
-    docker compose -f docker-compose.lab.yml up -d >/dev/null 2>&1
-    sleep 4
-    docker inspect -f '{{.State.Running}}' "$KALI" 2>/dev/null | grep -q true \
-        && ok "kali_attacker started" || { bad "could not start kali_attacker"; FAILED=1; }
+    # The lab belongs to ./start.sh, which also stops it on shutdown. Starting it here
+    # would leave containers running after the demo ends.
+    bad "kali_attacker not running — run ./start.sh in another terminal first"
+    FAILED=1
 fi
 
 if curl -sf -o /dev/null "$API/api/auth/login" -X POST -H 'Content-Type: application/json' \

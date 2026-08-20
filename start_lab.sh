@@ -34,7 +34,10 @@ fi
 
 # 4. Start Backend Server with Scapy Packet Sniffing Capability
 echo "[3/4] Starting PhantomAgent Backend Server (FastAPI + Scapy + GNN + Gemma)..."
-sudo PYTHONPATH=/usr/local/lib/python3.12/dist-packages:/home/tarun/.local/lib/python3.12/site-packages:. python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 &
+# Loopback by default: this API approves containment actions that run with sudo.
+# Override deliberately with PHANTOM_HOST if you need it reachable off-box.
+sudo PYTHONPATH=/usr/local/lib/python3.12/dist-packages:/home/tarun/.local/lib/python3.12/site-packages:. \
+    python3 -m uvicorn backend.main:app --host "${PHANTOM_HOST:-127.0.0.1}" --port "${PHANTOM_PORT:-8000}" &
 BACKEND_PID=$!
 echo "      Backend running under PID ${BACKEND_PID} at http://localhost:8000"
 
@@ -55,6 +58,19 @@ echo "   - Attacker (Kali) : Container 'kali_attacker' (IP: 172.28.0.10)"
 echo "==============================================================================="
 echo "Press Ctrl+C to terminate services."
 
-trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null; exit 0" INT TERM
+cleanup() {
+    trap - INT TERM EXIT           # prevent re-entry
+    echo ""
+    echo "[SYSTEM] Shutting down PhantomAgent..."
+    kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
+    # The lab is started by this script, so this script stops it. Without this the
+    # containers outlive the software.
+    echo "[SYSTEM] Stopping Docker Lab containers..."
+    docker compose -f docker-compose.lab.yml stop 2>/dev/null || true
+    echo "[SYSTEM] All services stopped."
+    exit 0
+}
+
+trap cleanup INT TERM EXIT
 
 wait
