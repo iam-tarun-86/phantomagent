@@ -34,6 +34,25 @@ from backend.pipeline.decision_engine import DecisionEngine
 from backend.pipeline.responder import Responder
 
 
+async def record_status(threat_id: str, status: ThreatStatus, result: Dict = None):
+    """
+    Persist a post-detection status transition.
+
+    save_threat() runs once, while a critical threat is still PENDING_APPROVAL. Without
+    this write-back the database permanently reports every such threat as awaiting
+    approval, no matter what the operator or the timeout actually did.
+    """
+    action_taken = ", ".join(result.get("actions_taken", [])) if result else None
+    try:
+        updated = await asyncio.to_thread(
+            db.update_threat_status, threat_id, status.value, action_taken
+        )
+        if not updated:
+            print(f"[DB] No threat row to update for {threat_id} (status {status.value})")
+    except Exception as e:
+        print(f"[DB] Failed to persist status for {threat_id}: {e}")
+
+
 class DashboardState:
     def __init__(self):
         # DASHBOARD STARTS FRESH — no old threats/logs on startup
@@ -83,8 +102,8 @@ class DashboardState:
         if len(self.logs) > 100:
             self.logs = self.logs[-100:]
         
-        # SAVE TO DATABASE
-        db.save_log(log_entry)
+        # SAVE TO DATABASE (off the event loop — sqlite writes are blocking)
+        await asyncio.to_thread(db.save_log, log_entry)
         
         await self.broadcast({"type": "log", "data": log_entry})
     
@@ -149,6 +168,7 @@ class DashboardState:
         
         # The responder consumes this structured intent; it is never a shell string.
         defense_action = analysis.get('defense_action') or {"action": "NONE", "target_ip": ""}
+        auto_actions = ""
 
         if decision['requires_approval']:
             threat.status = ThreatStatus.PENDING
@@ -188,7 +208,8 @@ class DashboardState:
             auto_threat = threat.to_dict()
             auto_threat['defense_action'] = defense_action
             result = await self.responder.execute(decision['action'], auto_threat)
-            
+            auto_actions = ', '.join(result.get('actions_taken', []))
+
             await self.broadcast_pipeline(4, threat.to_dict())
             await self.add_log("RESPONSE", "INFO", "Auto-contained")
             self.telemetry['threats_blocked'] += 1
@@ -210,8 +231,14 @@ class DashboardState:
         threat_dict['has_consensus'] = analysis.get('has_consensus', False)
         threat_dict['severity_breakdown'] = analysis.get('severity_breakdown', {})
 
-        # SAVE TO DATABASE
-        db.save_threat(threat_dict)
+        # SAVE TO DATABASE (off the event loop — sqlite writes are blocking)
+        await asyncio.to_thread(db.save_threat, threat_dict)
+
+        # Auto-contained threats resolve inside this same call, so record what the
+        # responder did now that the row exists.
+        if threat.status == ThreatStatus.AUTO_CONTAINED and auto_actions:
+            await record_status(threat.id, ThreatStatus.AUTO_CONTAINED,
+                                {"actions_taken": [auto_actions]})
 
         await self.broadcast({"type": "threat", "data": threat_dict})
     
@@ -234,7 +261,8 @@ class DashboardState:
             try:
                 pending = self.pending_approvals.pop(threat_id)
                 result = await self.responder.execute('LOCKDOWN', pending['threat'])
-                
+
+                await record_status(threat_id, ThreatStatus.AUTO_CONTAINED, result)
                 await self.add_log("RESPONSE", "INFO", f"AUTO-TIMEOUT → {', '.join(result['actions_taken'])}")
                 self.telemetry['threats_blocked'] += 1
                 
@@ -465,11 +493,11 @@ async def get_logs(limit: int = 50):
 # NEW: Fetch ALL historical logs from database for fullscreen viewer
 @app.get("/api/logs/all", dependencies=[Depends(require_token)])
 async def get_all_logs():
-    return db.load_logs(limit=1000)
+    return await asyncio.to_thread(db.load_logs, 1000)
 
 @app.delete("/api/logs/all", dependencies=[Depends(require_token)])
 async def delete_all_logs():
-    db.clear_all_logs()
+    await asyncio.to_thread(db.clear_all_logs)
     state.logs = []
     state.threats = []
     await state.broadcast({"type": "clear_logs"})
@@ -490,6 +518,7 @@ async def approve_all_threats():
             if threat_id in state.pending_approvals:
                 pending = state.pending_approvals.pop(threat_id)
                 result = await state.responder.execute('LOCKDOWN', pending['threat'])
+                await record_status(threat_id, ThreatStatus.CONTAINED, result)
                 await state.add_log("RESPONSE", "INFO", f"APPROVED ALL → {threat_id} ({', '.join(result['actions_taken'])})")
                 state.telemetry['threats_blocked'] += 1
                 
@@ -521,7 +550,8 @@ async def approve_threat(threat_id: str):
         if threat_id in state.pending_approvals:
             pending = state.pending_approvals.pop(threat_id)
             result = await state.responder.execute('LOCKDOWN', pending['threat'])
-            
+
+            await record_status(threat_id, ThreatStatus.CONTAINED, result)
             await state.add_log("RESPONSE", "INFO", f"APPROVED → {', '.join(result['actions_taken'])}")
             state.telemetry['threats_blocked'] += 1
             
@@ -553,6 +583,7 @@ async def dismiss_threat(threat_id: str):
     try:
         if threat_id in state.pending_approvals:
             pending = state.pending_approvals.pop(threat_id)
+            await record_status(threat_id, ThreatStatus.REJECTED)
             await state.add_log("DECISION", "INFO", f"Threat {threat_id} dismissed")
 
             # An operator saying "not a threat" is a free benign label — fold the score
@@ -576,7 +607,7 @@ async def dismiss_threat(threat_id: str):
 @app.post("/api/test/inject", dependencies=[Depends(require_token), Depends(require_demo_mode)])
 async def inject_test_event():
     event = {
-        "source": "WATCHER",
+        "source": "TEST_API",
         "type": "DNS_TUNNELING",
         "severity": 9,
         "source_ip": "185.220.101.47",
@@ -604,7 +635,7 @@ async def inject_test_event():
 @app.post("/api/test/inject-auto", dependencies=[Depends(require_token), Depends(require_demo_mode)])
 async def inject_test_event_auto():
     event = {
-        "source": "WATCHER",
+        "source": "TEST_API",
         "type": "FILE_ANOMALY",
         "severity": 7,
         "source_ip": "192.168.1.105",
@@ -633,7 +664,7 @@ async def inject_test_event_auto():
 async def inject_lateral_movement():
     """Simulate advanced persistent threat — lateral movement"""
     event = {
-        "source": "WATCHER",
+        "source": "TEST_API",
         "type": "SUSPICIOUS_LOGIN",
         "severity": 8,
         "source_ip": "10.0.0.45",
@@ -662,7 +693,7 @@ async def inject_lateral_movement():
 async def inject_ransomware():
     """Simulate ransomware behavior"""
     event = {
-        "source": "WATCHER",
+        "source": "TEST_API",
         "type": "FILE_ANOMALY",
         "severity": 10,
         "source_ip": "192.168.1.50",

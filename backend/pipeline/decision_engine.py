@@ -1,5 +1,6 @@
 """Decision engine: routes threats by severity and integrates GNN + Gemma reasoning"""
 
+import asyncio
 from typing import Dict, Any
 from backend.config import SEVERITY_THRESHOLDS
 from backend.pipeline.gnn_model import GNNPredictor
@@ -105,13 +106,14 @@ class DecisionEngine:
         # 5. Route decision by fused severity
         decision = self.decide(analysis)
 
-        # 6. Log event
-        self.logger.log_event(
-            source_ip=src_ip,
-            features=features,
-            gnn_score=gnn_score,
-            verdict=analysis,
-            action_taken=decision['action']
+        # 6. Log event — sqlite + file writes are blocking, keep them off the loop
+        await asyncio.to_thread(
+            self.logger.log_event,
+            src_ip,
+            features,
+            gnn_score,
+            analysis,
+            decision['action'],
         )
 
         return {

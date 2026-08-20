@@ -6,16 +6,20 @@ import sqlite3
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+from backend.config import DB_PATH, EVENTS_JSONL_PATH
+
+
 class EventLogger:
     """Logs raw features, GNN score, Gemma verdict, and action taken to SQLite and JSONL"""
 
     def __init__(
         self,
-        db_path: str = "data/phantomagent.db",
-        jsonl_path: str = "data/events_dataset.jsonl"
+        db_path=None,
+        jsonl_path=None
     ):
-        self.db_path = db_path
-        self.jsonl_path = jsonl_path
+        # Paths come from config so database.py and this module cannot drift apart.
+        self.db_path = str(db_path or DB_PATH)
+        self.jsonl_path = str(jsonl_path or EVENTS_JSONL_PATH)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
 
