@@ -1,76 +1,17 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ===============================================================================
-# PhantomAgent — Master Lab & System Launcher
-# Spins up Docker Lab (Kali + Juice Shop), Backend, and React Dashboard
+# Deprecated — use ./start.sh
+#
+# This was a second launcher that had drifted from start.sh: it used the system
+# python instead of the venv, bound the API to 0.0.0.0 instead of loopback, skipped
+# .env loading, and its trap killed the backend without stopping the containers.
+#
+# Two launchers meant two sets of bugs, so this now delegates. Kept as a shim so
+# existing muscle memory and any docs referring to it still work.
 # ===============================================================================
 
-set -e
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "==============================================================================="
-echo "               PHANTOMAGENT — AI INTRUSION DETECTION SYSTEM                    "
-echo "==============================================================================="
-
-# 1. Ensure Docker Lab Containers are Running
-echo "[1/4] Checking Docker Lab Containers..."
-if ! docker compose -f docker-compose.lab.yml ps | grep -q "kali_attacker"; then
-    echo "      Starting Docker Lab containers (kali_attacker & juice_shop)..."
-    docker compose -f docker-compose.lab.yml up -d
-else
-    echo "      Docker Lab containers are already UP."
-fi
-
-# 2. Ensure Database Directory Exists
-echo "[2/4] Initializing Storage Directories..."
-mkdir -p data backend/models
-
-# 3. Check GNN Model Weights
-if [ ! -f "backend/models/gnn_phantom.pt" ]; then
-    echo "      GNN model weights not found. Generating dataset and training GNN..."
-    PYTHONPATH=. python3 backend/scripts/generate_dataset.py
-    PYTHONPATH=. python3 backend/scripts/train_gnn.py
-else
-    echo "      GNN model weights found at backend/models/gnn_phantom.pt."
-fi
-
-# 4. Start Backend Server with Scapy Packet Sniffing Capability
-echo "[3/4] Starting PhantomAgent Backend Server (FastAPI + Scapy + GNN + Gemma)..."
-# Loopback by default: this API approves containment actions that run with sudo.
-# Override deliberately with PHANTOM_HOST if you need it reachable off-box.
-sudo PYTHONPATH=/usr/local/lib/python3.12/dist-packages:/home/tarun/.local/lib/python3.12/site-packages:. \
-    python3 -m uvicorn backend.main:app --host "${PHANTOM_HOST:-127.0.0.1}" --port "${PHANTOM_PORT:-8000}" &
-BACKEND_PID=$!
-echo "      Backend running under PID ${BACKEND_PID} at http://localhost:8000"
-
-# 5. Start Frontend Dev Server
-echo "[4/4] Starting React Dashboard Frontend..."
-cd frontend
-npm run dev &
-FRONTEND_PID=$!
-cd ..
-echo "      Frontend running at http://localhost:5173"
-
-echo "==============================================================================="
-echo "✅ PhantomAgent System Fully Operational!"
-echo "   - React Dashboard : http://localhost:5173"
-echo "   - Backend API     : http://localhost:8000"
-echo "   - Target (Juice)  : http://localhost:3000 (IP: 172.28.0.5)"
-echo "   - Attacker (Kali) : Container 'kali_attacker' (IP: 172.28.0.10)"
-echo "==============================================================================="
-echo "Press Ctrl+C to terminate services."
-
-cleanup() {
-    trap - INT TERM EXIT           # prevent re-entry
-    echo ""
-    echo "[SYSTEM] Shutting down PhantomAgent..."
-    kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true
-    # The lab is started by this script, so this script stops it. Without this the
-    # containers outlive the software.
-    echo "[SYSTEM] Stopping Docker Lab containers..."
-    docker compose -f docker-compose.lab.yml stop 2>/dev/null || true
-    echo "[SYSTEM] All services stopped."
-    exit 0
-}
-
-trap cleanup INT TERM EXIT
-
-wait
+echo "[NOTE] start_lab.sh is deprecated — running ./start.sh instead."
+echo ""
+exec "$ROOT/start.sh" "$@"
