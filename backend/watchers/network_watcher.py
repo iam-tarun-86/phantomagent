@@ -60,10 +60,11 @@ class NetworkWatcher:
         src_ip = ip_layer.src
         dst_ip = ip_layer.dst
 
-        # Ignore local host or internal gateway whitelist
-        if src_ip in self.whitelist:
-            return
-
+        # NOTE: whitelisted hosts are still INGESTED, and only excluded from alerting
+        # further down. They are part of the communication graph, and the graph is what
+        # the GNN reasons over: a scanner is identified by its targets answering with
+        # RSTs, and the target is exactly the host the whitelist covers. Dropping those
+        # packets here erased the neighbourhood signal and every live scan scored 0.0000.
         pkt_info = {
             'timestamp': time.time(),
             'src_ip': src_ip,
@@ -98,8 +99,11 @@ class NetworkWatcher:
 
         self.feature_extractor.process_packet(pkt_info)
 
-        # Trigger feature check if callback is configured
+        # Trigger feature check if callback is configured (only for non-whitelisted sources)
         if self.callback and self.loop:
+            if src_ip in self.whitelist:
+                return
+
             features = self.feature_extractor.get_features(src_ip)
             
             # Attack Signatures:
