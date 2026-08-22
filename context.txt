@@ -686,9 +686,28 @@ Enumerating ALL 32 vote combinations disproved this:
   - The new rule is MORE PERMISSIVE: 25 of 32 combinations pass, vs 16 under flat.
 It is a CORRECTNESS fix (correlated evidence no longer double-counted), NOT a
 false-positive reduction. Docstring corrected; ablation 3 prints the comparison.
-Threshold stays at 2 deliberately — raising it to 3 tightens to 13 combinations but
-suppresses single-window port scans (which produce only structural + behavioural).
+-------------------------------------------------------------------------------
+PHASE 24 — Live Sniffer Whitelist Separation: Graph Ingestion vs. Alert Dispatch
+-------------------------------------------------------------------------------
+Problem Solved:
+- Live Nmap scan from Kali (`172.28.0.10`) was captured by the sniffer, but was logged as
+  `sev=3 LOGGED` with zero containment.
+- Root Cause: In `network_watcher.py`, `src_ip in self.whitelist` was checked at the very top
+  of `_packet_handler`. When the victim (`172.28.0.5`) responded to Nmap with TCP RSTs, its
+  packets were discarded before feature/graph ingestion. The communication graph never
+  contained the RST-heavy target, reducing the attacker to an isolated node. The GraphSAGE
+  model correctly scores an isolated node as ~0.0022, causing the consensus gate to fail.
 
+What We Fixed:
+1. `backend/watchers/network_watcher.py`:
+   - Separated packet ingestion from alert dispatching.
+   - All packets (including from whitelisted IPs like `172.28.0.5`) are ingested into
+     `FeatureExtractor` to maintain full graph topology (fan-out edges and RST feedback).
+   - Whitelist check (`if src_ip in self.whitelist: return`) is applied strictly at alert
+     dispatch time, preventing false alerts on the victim while preserving the graph context.
+2. Verified live path: Graph scoring now outputs `{'172.28.0.10': 1.0000, '172.28.0.5': 0.0000}`,
+   consensus gate passes (3/5 votes, 2 evidence sources), and real `iptables` DROP rules are
+   installed in the `PHANTOM` chain.
 
 -------------------------------------------------------------------------------
 KNOWN OPEN ITEMS (deliberate, not oversights)
