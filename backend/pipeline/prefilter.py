@@ -32,6 +32,11 @@ class PreFilter:
             'min_severity': 8,
             'max_severity': 10,
         },
+        'DOS_ATTACK': {
+            'pattern': r'flood|dos|denial of service|zero-day|anomaly|high-entropy',
+            'min_severity': 8,
+            'max_severity': 10,
+        },
     }
     
     def __init__(self):

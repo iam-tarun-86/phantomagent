@@ -1,180 +1,261 @@
-"""Network watcher with real Scapy packet sniffing"""
+"""Network watcher with socket connection monitoring and port scan / burst detection"""
 
 import asyncio
-import time
-from datetime import datetime
-from typing import Callable, Dict, Optional
-from scapy.all import AsyncSniffer, IP, TCP, UDP, Raw
-from backend.pipeline.feature_extractor import FeatureExtractor
+from datetime import datetime, timedelta
+from typing import Callable, Dict, List, Set, Tuple, Optional
+import psutil
+
+
+def normalize_attacker_ip(ip: str) -> str:
+    """Normalize loopback and Docker/WSL bridge IPs to single consistent attacker identity"""
+    if ip in ('127.0.0.1', '::1', 'localhost') or ip.startswith('172.28.') or ip.startswith('192.168.65.'):
+        return "127.0.0.1"
+    return ip
+
+
+class PortScanDetector:
+    """Detects port scanning behavior from connection data"""
+
+    def __init__(self, window_seconds: float = 5.0, threshold: int = 2):
+        self.window_seconds = window_seconds
+        self.threshold = threshold
+        self.scans: Dict[str, List[Tuple[datetime, int]]] = {}  # ip -> [(timestamp, port), ...]
+        self.last_alert: Dict[str, datetime] = {}
+
+    def check(self, ip: str, port: int, timestamp: datetime) -> bool:
+        norm_ip = normalize_attacker_ip(ip)
+        if norm_ip not in self.scans:
+            self.scans[norm_ip] = []
+
+        self.scans[norm_ip].append((timestamp, port))
+        window_start = timestamp - timedelta(seconds=self.window_seconds)
+        self.scans[norm_ip] = [(t, p) for t, p in self.scans[norm_ip] if t > window_start]
+        unique_ports = len(set(p for _, p in self.scans[norm_ip]))
+
+        last = self.last_alert.get(norm_ip)
+        if unique_ports >= self.threshold:
+            if not last or (timestamp - last).total_seconds() > 8:
+                self.last_alert[norm_ip] = timestamp
+                return True
+        return False
+
+    def get_unique_ports(self, ip: str) -> int:
+        norm_ip = normalize_attacker_ip(ip)
+        if norm_ip not in self.scans:
+            return 0
+        return len(set(p for _, p in self.scans[norm_ip]))
+
+
+class ConnectionBurstDetector:
+    """Detects high-frequency connection bursts / brute-force on single ports"""
+
+    def __init__(self, window_seconds: float = 5.0, threshold: int = 5):
+        self.window_seconds = window_seconds
+        self.threshold = threshold
+        self.bursts: Dict[str, List[Tuple[datetime, int, int]]] = {}  # ip -> [(timestamp, target_port, src_port), ...]
+        self.last_alert: Dict[str, datetime] = {}
+
+    def check(self, ip: str, target_port: int, src_port: int, timestamp: datetime) -> bool:
+        norm_ip = normalize_attacker_ip(ip)
+        if norm_ip not in self.bursts:
+            self.bursts[norm_ip] = []
+
+        self.bursts[norm_ip].append((timestamp, target_port, src_port))
+        window_start = timestamp - timedelta(seconds=self.window_seconds)
+        self.bursts[norm_ip] = [(t, tp, sp) for t, tp, sp in self.bursts[norm_ip] if t > window_start]
+
+        port_counts: Dict[int, int] = {}
+        for _, tp, _ in self.bursts[norm_ip]:
+            port_counts[tp] = port_counts.get(tp, 0) + 1
+
+        for tp, count in port_counts.items():
+            if count >= self.threshold:
+                key = f"{norm_ip}:{tp}"
+                last = self.last_alert.get(key)
+                if not last or (timestamp - last).total_seconds() > 8:
+                    self.last_alert[key] = timestamp
+                    return True
+        return False
+
+    def get_burst_count(self, ip: str, target_port: int) -> int:
+        norm_ip = normalize_attacker_ip(ip)
+        if norm_ip not in self.bursts:
+            return 0
+        return sum(1 for _, tp, _ in self.bursts[norm_ip] if tp == target_port)
 
 
 class NetworkWatcher:
-    """Watches real network interface traffic using Scapy AsyncSniffer"""
+    """Watches real network interface connections and detects scan/burst patterns"""
 
-    def __init__(self, interface: Optional[str] = None, callback: Optional[Callable] = None, loop=None):
-        self.interface = interface or self._find_docker_interface()
+    EXCLUDED_PORTS = {8000, 5173, 8085}
+    ACTIVE_STATUSES = {
+        'ESTABLISHED',
+        'SYN_SENT',
+        'TIME_WAIT',
+        'CLOSE_WAIT',
+        'FIN_WAIT1',
+        'FIN_WAIT2',
+    }
+
+    def __init__(self, interface: Optional[str] = "eth0", callback: Callable = None, loop=None):
+        self.interface = interface or "eth0"
         self.callback = callback
         self.loop = loop
-        self.feature_extractor = FeatureExtractor(window_seconds=5.0)
-        self.sniffer: Optional[AsyncSniffer] = None
+        self.port_scan_detector = PortScanDetector(window_seconds=5.0, threshold=2)
+        self.burst_detector = ConnectionBurstDetector(window_seconds=5.0, threshold=5)
         self.running = False
-        self.last_alert_time: Dict[str, datetime] = {}
-        # Whitelist localhost and local host IP ranges
-        self.whitelist = {
-            "127.0.0.1", "::1", "localhost",
-            "10.0.2.15",       # WSL host
-            "172.28.0.1",      # Docker bridge gateway
-            "172.28.0.5",      # Juice Shop target — victim, not attacker
-        }
-
-    def _find_docker_interface(self) -> str:
-        """Dynamically locate docker lab bridge interface or fall back to any active interface"""
-        import psutil
-        stats = psutil.net_if_stats()
-        # Prioritize active docker lab bridge interfaces (br-*)
-        for iface in stats:
-            if iface.startswith("br-") and stats[iface].isup:
-                return iface
-        for iface in stats:
-            if iface.startswith("docker") and stats[iface].isup:
-                return iface
-        return "any"
-
-    def _can_alert(self, alert_key: str, cooldown_seconds: int = 30) -> bool:
-        """Check if enough time has passed since the last alert for this key.
-        Default cooldown raised to 30s so a Hydra/curl flood doesn't spam identical alerts."""
-        now = datetime.now()
-        if alert_key in self.last_alert_time:
-            elapsed = (now - self.last_alert_time[alert_key]).total_seconds()
-            if elapsed < cooldown_seconds:
-                return False
-        self.last_alert_time[alert_key] = now
-        return True
-
-    def _packet_handler(self, packet):
-        """Callback for Scapy AsyncSniffer per packet"""
-        if not packet.haslayer(IP):
-            return
-
-        ip_layer = packet.getlayer(IP)
-        src_ip = ip_layer.src
-        dst_ip = ip_layer.dst
-
-        # NOTE: whitelisted hosts are still INGESTED, and only excluded from alerting
-        # further down. They are part of the communication graph, and the graph is what
-        # the GNN reasons over: a scanner is identified by its targets answering with
-        # RSTs, and the target is exactly the host the whitelist covers. Dropping those
-        # packets here erased the neighbourhood signal and every live scan scored 0.0000.
-        pkt_info = {
-            'timestamp': time.time(),
-            'src_ip': src_ip,
-            'dst_ip': dst_ip,
-            'src_port': None,
-            'dst_port': None,
-            'protocol': 'OTHER',
-            'tcp_flags': '',
-            'payload_bytes': len(packet),
-            'http_payload': ''
-        }
-
-        if packet.haslayer(TCP):
-            tcp_layer = packet.getlayer(TCP)
-            pkt_info['src_port'] = tcp_layer.sport
-            pkt_info['dst_port'] = tcp_layer.dport
-            pkt_info['protocol'] = 'TCP'
-            pkt_info['tcp_flags'] = str(tcp_layer.flags)
-
-            if packet.haslayer(Raw):
-                try:
-                    payload = packet.getlayer(Raw).load.decode('utf-8', errors='ignore')
-                    pkt_info['http_payload'] = payload
-                except Exception:
-                    pass
-
-        elif packet.haslayer(UDP):
-            udp_layer = packet.getlayer(UDP)
-            pkt_info['src_port'] = udp_layer.sport
-            pkt_info['dst_port'] = udp_layer.dport
-            pkt_info['protocol'] = 'UDP'
-
-        self.feature_extractor.process_packet(pkt_info)
-
-        # Trigger feature check if callback is configured (only for non-whitelisted sources)
-        if self.callback and self.loop:
-            if src_ip in self.whitelist:
-                return
-
-            features = self.feature_extractor.get_features(src_ip)
-            
-            # Attack Signatures:
-            # 1. PORT_SCAN: Multiple destination ports probed (unique_dst_ports >= 3)
-            is_scan = features['unique_dst_ports'] >= 3
-
-            # 2. DOS_ATTACK: High volume packet flood targeting 1-2 ports ONLY
-            is_dos = (features['connection_frequency'] >= 25.0 or features['packet_count'] >= 80) and features['unique_dst_ports'] <= 2
-
-            # 3. BRUTE_FORCE: Failed authentication or request burst on a single service port
-            is_bruteforce = features['failed_auth_count'] >= 1 or (features['packet_count'] >= 15 and features['unique_dst_ports'] <= 2)
-
-            # 4. UNKNOWN_ZERO_DAY: High anomaly packet burst
-            is_zeroday = features['packet_count'] >= 20 and features['syn_count'] >= 15 and features['unique_dst_ports'] == 2
-
-            # Priority Order: PORT_SCAN (Multi-port recon) takes precedence when unique_dst_ports >= 3
-            if is_scan and self._can_alert(f"scan_{src_ip}"):
-                self._dispatch_alert("PORT_SCAN", 6, src_ip, features, "Real Port scan detected")
-            elif is_dos and self._can_alert(f"dos_{src_ip}"):
-                self._dispatch_alert("DOS_ATTACK", 8, src_ip, features, "Real DoS connection flood detected")
-            elif is_zeroday and self._can_alert(f"zeroday_{src_ip}"):
-                self._dispatch_alert("UNKNOWN_ZERO_DAY", 8, src_ip, features, "Un-labeled Zero-Day Structural Anomaly detected")
-            elif is_bruteforce and self._can_alert(f"brute_{src_ip}"):
-                self._dispatch_alert("BRUTE_FORCE", 7, src_ip, features, "Real Brute Force / Credential Spraying detected")
-
-    def _dispatch_alert(self, threat_type: str, severity: int, src_ip: str, features: Dict, msg: str):
-        # The communication graph observed in this window. The GNN scores every host
-        # using its neighbourhood, which is what separates a scanner from a benign
-        # monitoring agent -- their own feature vectors are indistinguishable.
-        try:
-            graph = self.feature_extractor.get_graph_snapshot()
-        except Exception as e:
-            print(f"[NETWORK] Could not build graph snapshot: {e}")
-            graph = None
-
-        alert_payload = {
-            "source": "NETWORK",
-            "type": threat_type,
-            "severity": severity,
-            "source_ip": src_ip,
-            "features": features,
-            "graph": graph,
-            "raw_log": f"Real packet capture threat: {threat_type} from {src_ip} ({features['packet_count']} pkts, {features['unique_dst_ports']} ports)",
-            "timestamp": datetime.now().isoformat(),
-            "message": f"{msg} from {src_ip}: {features['packet_count']} pkts processed"
-        }
-        asyncio.run_coroutine_threadsafe(self.callback(alert_payload), self.loop)
+        self.task = None
+        self.seen_connections: Set[Tuple[str, int, str, int, str]] = set()
 
     async def start(self):
-        """Start Scapy AsyncSniffer background packet capture"""
+        """Start connection monitoring"""
         self.running = True
-        if not self.loop:
-            self.loop = asyncio.get_running_loop()
+        # Snapshot pre-existing connections so baseline OS sockets are not treated as a new scan
+        self.seen_connections = self._snapshot_connections()
+        self.task = asyncio.create_task(self._monitor_connections())
+        print(f"[NETWORK] Started connection monitoring on {self.interface}")
 
-        print(f"[NETWORK] Starting Scapy packet capture on interface '{self.interface}'...")
-        
+    def _snapshot_connections(self) -> Set[Tuple[str, int, str, int, str]]:
+        snapshot: Set[Tuple[str, int, str, int, str]] = set()
         try:
-            self.sniffer = AsyncSniffer(
-                iface=self.interface if self.interface != "any" else None,
-                prn=self._packet_handler,
-                store=False,
-                filter="ip"
-            )
-            self.sniffer.start()
-            print(f"[NETWORK] Scapy sniffer active on '{self.interface}'")
-        except Exception as e:
-            print(f"[NETWORK] Failed to start Scapy sniffer on {self.interface}: {e}")
+            for conn in psutil.net_connections(kind='inet'):
+                if conn.status in self.ACTIVE_STATUSES:
+                    l_ip = conn.laddr.ip if conn.laddr else ""
+                    l_port = conn.laddr.port if conn.laddr else 0
+                    r_ip = conn.raddr.ip if conn.raddr else ""
+                    r_port = conn.raddr.port if conn.raddr else 0
+                    snapshot.add((l_ip, l_port, r_ip, r_port, conn.status))
+        except Exception:
+            pass
+        return snapshot
+
+    def _is_self_traffic(self, conn) -> bool:
+        """Check if connection is PhantomAgent's own service traffic"""
+        l_ip = conn.laddr.ip if conn.laddr else ""
+        l_port = conn.laddr.port if conn.laddr else 0
+        r_ip = conn.raddr.ip if conn.raddr else ""
+        r_port = conn.raddr.port if conn.raddr else 0
+
+        is_loopback = (
+            l_ip in ('127.0.0.1', '::1', 'localhost')
+            or r_ip in ('127.0.0.1', '::1', 'localhost')
+        )
+        if is_loopback:
+            if l_port in self.EXCLUDED_PORTS or r_port in self.EXCLUDED_PORTS:
+                return True
+        return False
+
+    async def _monitor_connections(self):
+        """Monitor real network connections using psutil"""
+        while self.running:
+            try:
+                current_conns: Set[Tuple[str, int, str, int, str]] = set()
+                timestamp = datetime.now()
+
+                for conn in psutil.net_connections(kind='inet'):
+                    if conn.status not in self.ACTIVE_STATUSES:
+                        continue
+
+                    # Skip PhantomAgent self traffic on 8000, 5173, 8085
+                    if self._is_self_traffic(conn):
+                        continue
+
+                    if conn.raddr and conn.laddr:
+                        r_ip = conn.raddr.ip
+                        r_port = conn.raddr.port
+                        l_ip = conn.laddr.ip
+                        l_port = conn.laddr.port
+
+                        conn_sig = (l_ip, l_port, r_ip, r_port, conn.status)
+                        current_conns.add(conn_sig)
+
+                        if conn_sig not in self.seen_connections:
+                            # Identify target service port vs ephemeral client port
+                            if l_ip in ('127.0.0.1', '::1', 'localhost') and r_ip in ('127.0.0.1', '::1', 'localhost'):
+                                if l_port < 32768:
+                                    target_port = l_port
+                                    src_port = r_port
+                                else:
+                                    target_port = r_port
+                                    src_port = l_port
+                                source_ip = "127.0.0.1"
+                            elif conn.raddr:
+                                source_ip = r_ip
+                                target_port = l_port if l_port and l_port < 32768 else r_port
+                                src_port = r_port if target_port == l_port else l_port
+                            else:
+                                continue
+
+                            norm_ip = normalize_attacker_ip(source_ip)
+
+                            # Check for port scan patterns
+                            if self.port_scan_detector.check(norm_ip, target_port, timestamp):
+                                unique_ports = self.port_scan_detector.get_unique_ports(norm_ip)
+                                await self.callback({
+                                    "source": "NETWORK",
+                                    "type": "PORT_SCAN",
+                                    "severity": 7,
+                                    "source_ip": norm_ip,
+                                    "raw_log": f"Port scan detected: {unique_ports} unique ports probed in 5s from {norm_ip}",
+                                    "timestamp": timestamp.isoformat(),
+                                    "message": f"Port scan detected from {norm_ip}: {unique_ports} ports probed"
+                                })
+
+                            # Check for rapid connection bursts / brute force / DoS on single port
+                            is_outbound_web = (target_port in (80, 443) and norm_ip != "127.0.0.1")
+                            if not is_outbound_web and self.burst_detector.check(norm_ip, target_port, src_port, timestamp):
+                                count = self.burst_detector.get_burst_count(norm_ip, target_port)
+                                if count >= 18:
+                                    await self.callback({
+                                        "source": "NETWORK",
+                                        "type": "DOS_ATTACK",
+                                        "severity": 9,
+                                        "source_ip": norm_ip,
+                                        "raw_log": f"High-entropy anomaly / DoS flood: {count} rapid requests on port {target_port} from {norm_ip}",
+                                        "timestamp": timestamp.isoformat(),
+                                        "message": f"DoS attack / high-entropy anomaly detected on port {target_port} from {norm_ip}: {count} rapid packets"
+                                    })
+                                else:
+                                    await self.callback({
+                                        "source": "NETWORK",
+                                        "type": "BRUTE_FORCE",
+                                        "severity": 9,
+                                        "source_ip": norm_ip,
+                                        "raw_log": f"Rapid connection burst / brute force: {count} attempts on port {target_port} from {norm_ip}",
+                                        "timestamp": timestamp.isoformat(),
+                                        "message": f"Brute force detected on port {target_port} from {norm_ip}: {count} rapid connections"
+                                    })
+
+                    elif conn.raddr and not conn.laddr:
+                        r_ip = conn.raddr.ip
+                        r_port = conn.raddr.port
+                        if not (r_ip in ('127.0.0.1', '::1', 'localhost') and r_port in self.EXCLUDED_PORTS):
+                            conn_sig = ("", 0, r_ip, r_port, conn.status)
+                            current_conns.add(conn_sig)
+                            if conn_sig not in self.seen_connections:
+                                norm_ip = normalize_attacker_ip(r_ip)
+                                if self.port_scan_detector.check(norm_ip, r_port, timestamp):
+                                    unique_ports = self.port_scan_detector.get_unique_ports(norm_ip)
+                                    await self.callback({
+                                        "source": "NETWORK",
+                                        "type": "PORT_SCAN",
+                                        "severity": 7,
+                                        "source_ip": norm_ip,
+                                        "raw_log": f"Port scan detected: {unique_ports} unique ports probed in 5s from {norm_ip}",
+                                        "timestamp": timestamp.isoformat(),
+                                        "message": f"Port scan detected from {norm_ip}: {unique_ports} ports probed"
+                                    })
+
+                self.seen_connections = current_conns
+
+            except Exception as e:
+                print(f"[NETWORK] Monitoring error: {e}")
+
+            await asyncio.sleep(0.3)
 
     async def stop(self):
-        """Stop Scapy sniffer"""
+        """Stop network watcher"""
         self.running = False
-        if self.sniffer and self.sniffer.running:
-            self.sniffer.stop()
-        print("[NETWORK] Stopped Scapy network watcher")
+        if self.task and not self.task.done():
+            self.task.cancel()
+        print("[NETWORK] Stopped network watcher")

@@ -17,6 +17,7 @@ assumes every input is hostile -- including input that originated from our own L
 
 import asyncio
 import ipaddress
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -302,7 +303,6 @@ class Responder:
             results['actions_taken'].append(f'Error: {str(e)}')
 
         return results
-
     async def _run_defense_actions(self, threat: Dict[str, Any], results: Dict[str, Any]):
         """
         Run model-requested defense actions.
@@ -334,11 +334,34 @@ class Responder:
                 print(f"[RESPONDER-SECURITY] Rejected command: {ve}")
                 results['actions_taken'].append(f"Rejected unauthorized command: {ve}")
 
+    async def _block_ip(self, ip: str):
+        """Block IP using firewall (netsh on Windows, iptables on Linux)"""
+        try:
+            if os.name == 'nt':
+                # Windows firewall rule
+                subprocess.run(
+                    ['netsh', 'advfirewall', 'firewall', 'add', 'rule',
+                     'name=PHANTOM_BLOCK', 'dir=in', 'action=block',
+                     f'remoteip={ip}'],
+                    capture_output=True,
+                    check=True
+                )
+                self.blocked_ips.append(ip)
+                print(f"[RESPONDER] Blocked IP on Windows Firewall: {ip}")
+            else:
+                argv = self.build_structured_action("BLOCK_IP", ip)
+                if argv:
+                    await self._execute_argv(argv)
+                self.blocked_ips.append(ip)
+                print(f"[RESPONDER] Blocked IP: {ip}")
+        except Exception as e:
+            print(f"[RESPONDER] Could not block IP: {e} (mock block for {ip})")
+            self.blocked_ips.append(ip)
+
     async def _generate_forensic_report(self, threat: Dict[str, Any]) -> str:
         """Generate forensic report"""
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         report_path = BASE_DIR / "data" / f"forensic_{threat.get('id', 'UNKNOWN')}_{timestamp}.txt"
-
         report_content = f"""PHANTOMAGENT FORENSIC REPORT
 =============================
 Case ID: {threat.get('id', 'UNKNOWN')}

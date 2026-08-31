@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Dict, List
@@ -69,7 +70,7 @@ class LogWatcher:
                 print(f"[WATCHER] Watching real log: {path}")
             else:
                 # Create a test log that we can write to
-                test_path = Path("/tmp/phantomagent_test.log")
+                test_path = Path(tempfile.gettempdir()) / "phantomagent_test.log"
                 test_path.parent.mkdir(parents=True, exist_ok=True)
                 if not test_path.exists():
                     test_path.write_text("# PhantomAgent test log\n")

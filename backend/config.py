@@ -3,6 +3,7 @@
 import hashlib
 import os
 import secrets
+import tempfile
 from pathlib import Path
 
 # Paths
@@ -28,14 +29,16 @@ DNS_TUNNEL_DOMAINS = [".tk", ".ml", ".ga", ".cf"]
 
 # File System Config
 WATCHED_PATHS = [
-    "/tmp",
-    "/var/tmp",
+    tempfile.gettempdir(),
 ]
 
-# Gemma / LLM Config
-GEMMA_MODEL = "gemma4:e4b"
-GEMMA_API_URL = "http://localhost:8085/v1/chat/completions"
-GEMMA_TIMEOUT = 60
+# AI / LLM Config (Gemma 4 E2B GGUF via llama.cpp / Ollama)
+MODEL_NAME = "Gemma-4-E2B-Uncensored-HauhauCS-Aggressive-Q6_K_P.gguf"
+GEMMA_MODEL = MODEL_NAME
+AI_SERVER_URL = "http://localhost:8085"
+GEMMA_API_URL = f"{AI_SERVER_URL}/v1/chat/completions"
+AI_TIMEOUT = 30
+GEMMA_TIMEOUT = 30
 
 # Decision Engine Severity Thresholds
 SEVERITY_THRESHOLDS = {

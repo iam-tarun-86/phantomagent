@@ -203,10 +203,9 @@ phantomagent-dashboard/
 │   │   └── phantomagent.db     # Main threat & log database
 │   ├── models/
 │   │   └── threat.py           # SQL/Pydantic schemas for events
-│   ├── pipeline/
+│   │   ├── brain.py            # Local LLM AI reasoning & threat narrative engine (Gemma)
 │   │   ├── decision_engine.py  # Score router based on severity
 │   │   ├── prefilter.py        # Log sanitizer and denoiser
-│   │   ├── qwen_engine.py      # Ollama/Qwen 3.5 query builder
 │   │   └── responder.py        # Containment execution script (iptables)
 │   ├── utils/                  # Helper classes
 │   ├── watchers/
