@@ -1,0 +1,50 @@
+[
+  {
+    "run": 1,
+    "latency": 11.395773100000042,
+    "threat": {
+      "id": "184EA599",
+      "type": "Brute Force",
+      "severity": 9,
+      "source_ip": "127.0.0.1",
+      "timestamp": "2026-08-31T17:33:20.667434",
+      "status": "PENDING_APPROVAL",
+      "attack_pattern": "Rapid, high-volume brute-force connection burst targeting a specific service port, indicating an active credential testing phase.",
+      "explanation": "This is a critical, active brute-force intrusion attempting to compromise a service endpoint, requiring immediate lockdown and investigation.",
+      "action_taken": null,
+      "metadata": {}
+    }
+  },
+  {
+    "run": 2,
+    "latency": 11.426820399999997,
+    "threat": {
+      "id": "8B141142",
+      "type": "Brute Force",
+      "severity": 9,
+      "source_ip": "127.0.0.1",
+      "timestamp": "2026-08-31T17:33:36.850573",
+      "status": "PENDING_APPROVAL",
+      "attack_pattern": "Rapid, targeted brute-force attack characterized by five sequential connection attempts against a critical service port.",
+      "explanation": "This represents a critical, active brute-force intrusion attempt targeting the system on port 3000 that requires immediate lockdown.",
+      "action_taken": null,
+      "metadata": {}
+    }
+  },
+  {
+    "run": 3,
+    "latency": 11.445823399999881,
+    "threat": {
+      "id": "A9BDA65C",
+      "type": "Brute Force",
+      "severity": 9,
+      "source_ip": "127.0.0.1",
+      "timestamp": "2026-08-31T17:33:53.627939",
+      "status": "PENDING_APPROVAL",
+      "attack_pattern": "Rapid, targeted brute-force attack targeting a specific service port with multiple connection attempts.",
+      "explanation": "This represents a critical, active intrusion attempt indicating an immediate, high-severity threat to the service running on port 3000.",
+      "action_taken": null,
+      "metadata": {}
+    }
+  }
+]

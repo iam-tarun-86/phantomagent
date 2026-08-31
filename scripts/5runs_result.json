@@ -1,0 +1,112 @@
+[
+  {
+    "run": 1,
+    "total_time": 11.398108900000352,
+    "inference_time": 10.31156940000028,
+    "severity": 3,
+    "type": "Brute Force",
+    "status": "LOGGED",
+    "attack_pattern": "Rapid authentication bursts targeting a specific service port.",
+    "explanation": "This event represents a low-risk, routine authentication test or local service check, warranting informational logging.",
+    "full_json": {
+      "id": "60C1D7C9",
+      "type": "Brute Force",
+      "severity": 3,
+      "source_ip": "127.0.0.1",
+      "timestamp": "2026-08-31T17:26:13.890006",
+      "status": "LOGGED",
+      "attack_pattern": "Rapid authentication bursts targeting a specific service port.",
+      "explanation": "This event represents a low-risk, routine authentication test or local service check, warranting informational logging.",
+      "action_taken": null,
+      "metadata": {}
+    }
+  },
+  {
+    "run": 2,
+    "total_time": 11.422023999999965,
+    "inference_time": 10.336867600000005,
+    "severity": 3,
+    "type": "Brute Force",
+    "status": "LOGGED",
+    "attack_pattern": "Rapid authentication burst targeting a specific service port.",
+    "explanation": "This is a low-risk event indicating routine testing or a minor credential check on the local system.",
+    "full_json": {
+      "id": "4CC83CEC",
+      "type": "Brute Force",
+      "severity": 3,
+      "source_ip": "127.0.0.1",
+      "timestamp": "2026-08-31T17:26:31.337710",
+      "status": "LOGGED",
+      "attack_pattern": "Rapid authentication burst targeting a specific service port.",
+      "explanation": "This is a low-risk event indicating routine testing or a minor credential check on the local system.",
+      "action_taken": null,
+      "metadata": {}
+    }
+  },
+  {
+    "run": 3,
+    "total_time": 13.19773290000012,
+    "inference_time": 12.146219499999916,
+    "severity": 3,
+    "type": "Brute Force",
+    "status": "LOGGED",
+    "attack_pattern": "Rapid burst of 5 connection attempts targeting a specific service port.",
+    "explanation": "This is a low-risk event indicating routine testing or a minor credential check on the local system.",
+    "full_json": {
+      "id": "F595DBB2",
+      "type": "Brute Force",
+      "severity": 3,
+      "source_ip": "127.0.0.1",
+      "timestamp": "2026-08-31T17:26:48.374516",
+      "status": "LOGGED",
+      "attack_pattern": "Rapid burst of 5 connection attempts targeting a specific service port.",
+      "explanation": "This is a low-risk event indicating routine testing or a minor credential check on the local system.",
+      "action_taken": null,
+      "metadata": {}
+    }
+  },
+  {
+    "run": 4,
+    "total_time": 11.41513920000034,
+    "inference_time": 10.309606200000417,
+    "severity": 3,
+    "type": "Brute Force",
+    "status": "LOGGED",
+    "attack_pattern": "Rapid authentication bursts targeting a specific service port.",
+    "explanation": "This event represents a low-risk, routine test or minor brute-force attempt on the local host.",
+    "full_json": {
+      "id": "9CB7F002",
+      "type": "Brute Force",
+      "severity": 3,
+      "source_ip": "127.0.0.1",
+      "timestamp": "2026-08-31T17:27:05.349964",
+      "status": "LOGGED",
+      "attack_pattern": "Rapid authentication bursts targeting a specific service port.",
+      "explanation": "This event represents a low-risk, routine test or minor brute-force attempt on the local host.",
+      "action_taken": null,
+      "metadata": {}
+    }
+  },
+  {
+    "run": 5,
+    "total_time": 11.450110799999948,
+    "inference_time": 10.389559599999757,
+    "severity": 3,
+    "type": "Brute Force",
+    "status": "LOGGED",
+    "attack_pattern": "Rapid authentication burst targeting a specific service port.",
+    "explanation": "This is a low-risk event indicating routine testing or a minor credential check.",
+    "full_json": {
+      "id": "DA23FF3C",
+      "type": "Brute Force",
+      "severity": 3,
+      "source_ip": "127.0.0.1",
+      "timestamp": "2026-08-31T17:27:22.458986",
+      "status": "LOGGED",
+      "attack_pattern": "Rapid authentication burst targeting a specific service port.",
+      "explanation": "This is a low-risk event indicating routine testing or a minor credential check.",
+      "action_taken": null,
+      "metadata": {}
+    }
+  }
+]
